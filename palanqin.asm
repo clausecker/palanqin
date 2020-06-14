@@ -4,6 +4,10 @@
 	section	.data
 ident	db	"Copyright (c) 2020 Robert Clausecker <fuz@fuz.su>"
 
+	section	.bss
+	align	2
+edata	equ	$		; must be the first thing in .bss
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Parameters                                                                 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -23,8 +27,7 @@ start:	mov	sp, end+stack	; beginning of stack
 	; initialise .bss
 	xor	ax, ax
 	mov	di, edata
-	mov	cx, edata-start	; program image length
-	shr	cx, 1		; converted to words
+	mov	cx, (end-edata)/2 ; .bss section length in words
 	rep	stosw		; clear .bss
 
 	; configure emulator base address
@@ -37,7 +40,7 @@ start:	mov	sp, end+stack	; beginning of stack
 
 	; terminate argument vector
 	mov	di, 0x80	; argument vector length pointer
-	xchg	ax, bx		; clear bx
+	xor	bx, bx		; clear bx
 	mov	bl, [di]	; load argument vector length
 	inc	di		; beginning of arguments
 	mov	[bx+di], bh	; NUL-terminate arguments
@@ -54,7 +57,7 @@ start:	mov	sp, end+stack	; beginning of stack
 	; no argument was given: print usage and exit
 	mov	si, usage
 	call	puts		; print usage
-.die:	mov	ax, 0x4c01	; exit status 1 (failure)
+.die:	mov	ax, 0x4c01	; error level 1 (failure)
 	int	0x21		; 0x4c: TERMINATE PROGRAM
 
 	; an argment was given: try to open it
@@ -65,7 +68,9 @@ start:	mov	sp, end+stack	; beginning of stack
 	jnc	.1		; did an error occur?
 
 	; opening, reading, or closing the file failed
-.err:	mov	si, file	; load file name for error message
+.err:	push	cs
+	pop	ds		; set DS = CS
+	mov	si, [file]	; load file name for error message
 	call	perror		; print error message
 	jmp	.die		; and die
 
@@ -97,6 +102,7 @@ start:	mov	sp, end+stack	; beginning of stack
 	jc	.err
 
 	int3			; TODO ...
+	int	0x20		; exit process
 
 	section	.data
 usage	db	"Usage: PALANQIN CORTEXM0.IMG", 0
@@ -218,14 +224,6 @@ crlf	db	13,10,0
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Colophon                                                                   ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-	section	.text
-	align	2, db 0
-etext	equ	$		; end of text segment
-
-	section	.data
-	align	2, db 0
-edata	equ	$		; end of data segment
 
 	section	.bss
 	alignb	16
