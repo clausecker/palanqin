@@ -1,0 +1,16 @@
+ARM Cortex M0 emulator for DOS
+
+Register contents on reset:
+
+R0: program image base address
+R1: memory size
+
+Memory map:
+
+0x00000000 -- 0x000fffff	program image (adj. to load addr)
+0x01000000 -- 0x010fffff	host memory (unadjusted)
+0x02000000 -- 0x0200ffff	IO address space
+
+Scape hatches:
+
+SVC #42
