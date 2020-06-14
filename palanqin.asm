@@ -1,6 +1,8 @@
 ; Palanquin -- Cortex-M0 emulator for 8086
 ; Copyright (c) 2020 Robert Clausecker <fuz@fuz.su>
 
+	cpu	8086		; restrict nasm to 8086 instructions
+
 	section	.data
 ident	db	"Copyright (c) 2020 Robert Clausecker <fuz@fuz.su>"
 
@@ -13,6 +15,28 @@ edata	equ	$		; must be the first thing in .bss
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Macros                                                                     ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	; load value into ARM register
+%macro	ldrlo	2
+	mov	word [%1*2+reglo], %2
+%endmacro
+
+%macro	ldrhi	2
+	mov	word [%1*2+reghi], %2
+%endmacro
+
+	; store value of ARM register
+%macro	strlo	2
+	mov	%1, word [%2*2+reglo]
+%endmacro
+
+%macro	strhi	2
+	mov	%1, word [%2*2+reghi]
+%endmacro
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Startup and Initialisation                                                 ;;
@@ -60,7 +84,7 @@ start:	mov	sp, end+stack	; beginning of stack
 .die:	mov	ax, 0x4c01	; error level 1 (failure)
 	int	0x21		; 0x4c: TERMINATE PROGRAM
 
-	; an argment was given: try to open it
+	; an argument was given: try to open it
 .0:	mov	dx, di		; file name
 	mov	ax, 0x3d00	; AL=00 (open file for reading)
 	int	0x21		; 0x3d: OPEN EXISTING FILE
@@ -101,8 +125,40 @@ start:	mov	sp, end+stack	; beginning of stack
 	int	0x21		; 0x3e: CLOSE A FILE HANDLE
 	jc	.err
 
-	int3			; TODO ...
-	int	0x20		; exit process
+	; restore DS = CS
+	push	cs
+	pop	ds
+
+	; initial register set up: image base address (R0)
+	mov	bx, [imgbase] 	; load image base
+	mov	dx, bx
+	xor	ax, ax		; DX:AX contains the image base
+	call	seglin		; as a linear address
+	ldrlo	0, ax		; write load address to R0
+	ldrhi	0, dx
+
+	; initial register set up: memory size (R1)
+	mov	dx, [2]		; load first segment past program image from PSP
+	sub	dx, bx		; compute number of paragraphs available
+	xor	ax, ax		;  to the program
+	call	seglin		; and convert to a linear address
+	ldrlo	1, ax		; write memory size to R1
+	ldrhi	1, dx
+
+	; initial register set up: stack pointer and reset vector
+	mov	ds, bx		; load DS with emulated address space
+	xor	si, si		; vector table begin
+	lodsw			; load initial SP, low half
+	ldrlo	cs:13, ax
+	lodsw			; load initial SP, high half
+	ldrhi	cs:13, ax
+	lodsw			; load initial PC (reset vector), low half
+	ldrlo	cs:15, ax
+	lodsw			; load initial PC (reset vector), high half
+	ldrhi	cs:15, ax
+
+	int3			; breakpoint
+	int	0x20		; exit process (TODO)
 
 	section	.data
 usage	db	"Usage: PALANQIN CORTEXM0.IMG", 0
@@ -119,8 +175,8 @@ handle	resw	1		; image file handle
 	section	.bss
 	alignb	4
 state	equ	$
-regslo	resw	16		; ARM registers, low  hwords
-regshi	resw	16		; ARM registers, high hwords
+reglo	resw	16		; ARM registers, low  hwords
+reghi	resw	16		; ARM registers, high hwords
 imgbase	resw	1		; emulator image base segment
 flags	resw	1		; CPU flags in 8086 format
 
@@ -132,8 +188,7 @@ flags	resw	1		; CPU flags in 8086 format
 
 	; convert DX:AX into a linear address in DX:AX
 	; trashes CX
-seglin:	mov	dx, ds
-	mov	cl, 4
+seglin:	mov	cl, 4
 	rol	dx, cl		; dx = ds >> 12 | ds << 4
 	mov	cx, dx
 	and	dx, 0xf		; dx = ds >> 12
