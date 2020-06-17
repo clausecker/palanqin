@@ -4,7 +4,7 @@
 	cpu	8086		; restrict nasm to 8086 instructions
 
 	section	.data
-ident	db	"Copyright (c) 2020 Robert Clausecker <fuz@fuz.su>"
+ident	db	"Copyright (c) 2020 Robert Clausecker <fuz@fuz.su>", 0
 
 	section	.bss
 	align	2
