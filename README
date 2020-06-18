@@ -12,8 +12,10 @@ Ctrl+Break sends an NMI (not implemented yet)
 # Memory map
 
     0x00000000 -- 0x000fffff	program image (adj. to load addr)
-    0x01000000 -- 0x010fffff	host memory (unadjusted)
-    0x02000000 -- 0x0200ffff	IO address space
+    0x10000000 -- 0x100fffff	host memory (unadjusted)
+    0x40000000 -- 0x400fffff	8086 IO address space
+    0xe0000000 -- 0xe00fffff    emulated PPB
+    0xf0000000 -- 0xf00fffff    emulator escape hatches
 
 The Cortex M0 program image is loaded right after 256 bytes of
 emulator stack space and extends all the way to the end of the program.
@@ -23,10 +25,13 @@ of the program.
 
 # Escape hatches:
 
+TODO: Perhaps change this to some magic addresses in the region
+0xf0000000 -- 0xffffffff?
+
 The SVC instruction with operands in the range #0x80 to #0x8f is
 reserved to perform special functions.
 
-    SVC #0x80
+    BKPT #0xf0
 
 Perform a host software interrupt.  On entry, the 8086 registers are
 set up as described below.  On exit from the interrupt handler, the
@@ -54,19 +59,19 @@ for SS:SP is ignored.  The arithmetic flags (NZCV) are translated into
 x86 flags on entry to the software interrupt.  On exit, the flags are
 translated back into NZCV and also saved into R12.
 
-    SVC #0x81
+    BKPT #0xf1
 
 Perform a far call into native code.  The behaviour is the same as for
-SVC #0x80, except R9 is taken to contain a far pointer (segment/offset)
+BKPT #0xf0, except R9 is taken to contain a far pointer (segment/offset)
 to the function you want to call.  The function is called on the host
 stack.
 
-    SVC #0x82 (like SVC #0x80)
-    SVC #0x83 (like SVC #0x81)
+    BKPT #0xf2 (like BKPT #0xf0)
+    BKPT #0xf3 (like BKPT #0xf1)
 
 Perform software interrupts/far calls on the emulated stack.  The
 register usage is as above, except that SS:SP is taken from R10 and R4.
 
-    SVC #0x8f
+    BKPT #0xff
 
 Terminate the emulation and return to the host.
