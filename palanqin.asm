@@ -4,7 +4,7 @@
 	cpu	8086		; restrict nasm to 8086 instructions
 
 	section	.data
-ident	db	"Copyright (c) 2020 Robert Clausecker <fuz@fuz.su>", 0
+ident	db	"Copyright (c) 2020 Robert Clausecker <fuz@fuz.su>", 10, 13, 0
 
 	section	.bss
 	align	2
@@ -22,20 +22,20 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 
 	; load value into ARM register
 %macro	ldrlo	2
-	mov	word [%1*2+reglo], %2
+	mov	[%1*2+reglo], %2
 %endmacro
 
 %macro	ldrhi	2
-	mov	word [%1*2+reghi], %2
+	mov	[%1*2+reghi], %2
 %endmacro
 
 	; store value of ARM register
 %macro	strlo	2
-	mov	%1, word [%2*2+reglo]
+	mov	%1, [%2*2+reglo]
 %endmacro
 
 %macro	strhi	2
-	mov	%1, word [%2*2+reghi]
+	mov	%1, [%2*2+reghi]
 %endmacro
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -47,6 +47,10 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 
 	; relocate the stack
 start:	mov	sp, end+stack	; beginning of stack
+
+	; print copyright notice
+	mov	si, ident
+	call	puts
 
 	; initialise .bss
 	xor	ax, ax
@@ -157,8 +161,11 @@ start:	mov	sp, end+stack	; beginning of stack
 	lodsw			; load initial PC (reset vector), high half
 	ldrhi	cs:15, ax
 
-	int3			; breakpoint
-	int	0x20		; exit process (TODO)
+	call	run		; emulate a Cortex M0
+
+	strlo	al, cs:0	; load error level from R0
+	mov	ah, 0x4c
+	int	0x21		; 0x4c: TERMINATE PROGRAM
 
 	section	.data
 usage	db	"Usage: PALANQIN CORTEXM0.IMG", 0
@@ -177,8 +184,76 @@ handle	resw	1		; image file handle
 state	equ	$
 reglo	resw	16		; ARM registers, low  hwords
 reghi	resw	16		; ARM registers, high hwords
+pcaddr	resd	1		; location of the next instruction as a segment/
+				; offset pair.  The PC register in the register
+				; set is only updated as needed to increase
+				; performance.
 imgbase	resw	1		; emulator image base segment
 flags	resw	1		; CPU flags in 8086 format
+insn	resw	1		; the currently executed instruction
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Instruction Simulation                                                     ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	section	.text
+	; run the emulation until we need to stop for some reason
+run:	push	cs		; set up ds = cs
+	pop	ds
+	call	pcseg		; find the address of the next instruction
+.step:	call	step		; simulate one instruction
+	jmp	.step		; do it again and again
+
+	; simulate one instruction.  Assumes DS=CS.
+step:	les	si, [pcaddr]	; load the program counter into DS:SI
+	es	lodsw		; load an instruction
+	mov	[insn], ax	; remember a copy of the instruction in insn
+	mov	cl, 4
+	rol	ax, cl		; ax >> (15-4)
+	and	ax, 0x1e	; mask out the top 4 bits of the instruction
+	mov	bx, ax		; and use them to index a jump table
+	jmp	[tXXXX+bx]
+
+	section	.data
+	align	2
+	; first level jump table: decode the top 4 instruction bits
+tXXXX:	dw	h000		; 000XX shift immediate
+	dw	h000		; 00011 add/subtract register/immediate
+	dw	h001		; 00100 add/subtract/compare/move immediate
+	dw	h001
+	dw	h0100		; 010100XXXX data-processing register
+				; 010001XX special data processing
+				; 01001 LDR  (literal pool)
+	dw	h0101		; 0101 load/store register offset
+	dw	h011 		; 011XX load/store word/byte immediate offset
+	dw	h011
+	dw	h1000		; 1000X load/store halfword immediate offset
+	dw	h1001		; 1001X load from/store to stack
+	dw	h1010		; 1010X add to SP or PC
+	dw	h1011		; 1011XXXX miscellaneous instructions
+	dw	h1100		; 1100X load/store multiple
+	dw	h1101		; 1101XXXX conditional branch
+				; 11011110 undefined instruction
+				; 11011111 service call
+	dw	h1110		; 11100 B (unconditional branch)
+	dw	h1111		; 11110 branch and misc. control
+
+	section	.text
+
+	; instruction handlers that have not been implemented yet
+h000:
+h001:
+h0100:
+h0101:
+h011:
+h1000:
+h1001:
+h1010:
+h1011:
+h1100:
+h1101:
+h1110:
+h1111:	int3
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Address Space Conversion                                                   ;;
@@ -199,7 +274,7 @@ seglin:	mov	cl, 4
 
 	; convert linear address in DX:AX into a segmented address in DX:AX
 	; the offset is normalised to 0x0000--0x00ff
-	; ignores the high 12 bit of DX, trashes CX
+	; ignores the high 12 bit of DX, trashes CL
 linseg:	and	dx, 0xf
 	mov	dh, ah
 	mov	cl, 4
@@ -207,6 +282,31 @@ linseg:	and	dx, 0xf
 	mov	ds, dx		; ds = dx << 12 | ax >> 4 & 0x0ff0
 	xor	ah, ah		; ax = ax & 0x00ff
 	ret
+
+	; determine the segmented address of the current instruction from PC
+	; and load it into pcaddr.  Trashes CX.  If PC cannot be represented as
+	; an address, an exception is caused.
+pcseg:	strlo	ax, cs:15	; load PC into DX:AX
+	strhi	dx, cs:15
+	mov	ch, dh		; keep a copy of the top 4 bit of PC
+	call	linseg		; set up linear address in DX:AX
+	and	ch, 0xf0	; isolate address space nibble
+	test	ch, ch		; address space 0 (adjusted)?
+	jnz	.not0
+	add	dx, [cs:imgbase]; apply address space adjustment
+	jmp	.wb
+.not0:	cmp	ch, 2		; address space 2 (unadjusted)?
+	jne	.wild		; if not, this address cannot be translated
+.wb:	mov	[cs:pcaddr], ax	; set up translated PC with DX:AX
+	mov	[cs:pcaddr+2], dx
+	ret
+
+.wild:	int3			; TODO: generate an exception or something
+	jmp	.wild		; endless loop
+
+	; determine the linear address of the current instruction from pcaddr
+	; and load it into PC.  It is assumed that PC points into the right
+	; address space already.  Trashes CX.  If 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; IO Routines                                                                ;;
