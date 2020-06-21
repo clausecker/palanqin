@@ -226,7 +226,6 @@ step:	mov	bx, pcaddr	; save some bytes in the next few instructions
 	mov	cl, 5		; mask out the instruction's top 4 bits
 	rol	bx, cl		; and form a table offset
 	and	bx, 0x1e	; bx = ([insn] & 0xf000) >> (16 - 4) << 1
-	mov	bx, ax
 	mov	si, reglo	; for use with the decode handlers
 	mov	di, oprC	; for use with the decode handlers
 				; which also assume that AX=insn
@@ -295,7 +294,7 @@ d0001:	mov	cx, ax		; make a copy of insn
 				; else fall through and decode as imm5rr
 
 	; decode handler for imm5 / reg / reg
-	; instruction layout: XXXXXAAAAABBBCCC
+	; instruction layout: XXXX XAAA AABB BCCC
 	; for d000, we don't treat the 00011 opcodes specially;
 	; the handler for these instructions must manually decode the
 	; register from oprA
@@ -318,13 +317,13 @@ imm5rr:	mov	cx, ax		; keep a copy of insn for later
 	ret
 
 	; decode handler for reg / imm8
-	; instruction layout: XXXXXBBBCCCCCCCC
+	; instruction layout: XXXX XBBB CCCC CCCC
 rimm8:	xor	cx, cx
 	xchg	ah, cl		; AX=imm8, CX=reg
 	stosw			; oprC=imm8
 	xchg	ax, cx		; AX=reg
-	and	ax, 0x7		; mask out operand C
-	shl	ax, 1		; form an offset into the register table
+	shl	ax, 1		; AX = XXXX XXXX XXXX BBB0
+	and	ax, 0xe		; AX = 0000 0000 0000 BBB0
 	add	ax, si		; form a pointer to reglo[B]
 	stosw			; oprB = &reglo[B]
 	ret
