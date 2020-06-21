@@ -182,6 +182,7 @@ file	resw	1		; image file name
 state	equ	$
 reglo	resw	16		; ARM registers, low  hwords
 reghi	resw	16		; ARM registers, high hwords
+hi	equ	reghi-reglo	; to turn a reglo pointer into a reghi pointer
 pcaddr	resd	1		; location of the next instruction as a segment/
 				; offset pair.  The PC register in the register
 				; set is only updated as needed to increase
@@ -190,19 +191,29 @@ imgbase	resw	1		; emulator image base segment
 flags	resw	1		; CPU flags in 8086 format
 insn	resw	1		; the currently executed instruction
 
+	; instruction decoding state variables
+	; immediate operands are zero/sign-extended to 16 bit
+	; register operands are represented by a pointer to the appropriate
+	; reglo array member
+oprC	resw	1		; third operand (towards least significant bit)
+oprB	resw	1		; second operand (middle of the instruction)
+oprA	resw	1		; first operand (towards most significant bit)
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Instruction Simulation                                                     ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	section	.text
 	; run the emulation until we need to stop for some reason
-run:	push	cs		; set up ds = cs
+run:	push	cs		; set up es = ds = cs
+	push	cs
 	pop	ds
+	pop	es
 	call	pcseg		; find the address of the next instruction
 .step:	call	step		; simulate one instruction
 	jmp	.step		; do it again and again
 
-	; simulate one instruction.  Assumes DS=CS.
+	; simulate one instruction.  Assumes ES=DS=CS.
 step:	mov	bx, pcaddr	; save some bytes in the next few instructions
 	les	si, [bx]	; load the program counter into DS:SI
 	es	lodsw		; load an instruction
@@ -211,18 +222,48 @@ step:	mov	bx, pcaddr	; save some bytes in the next few instructions
 	jnz	.1		; if yes, apply overflow to pcaddr
 	add	byte [bx+3], 0x10
 .1:	mov	[insn], ax	; remember a copy of the instruction in insn
+	mov	bx, ax		; and in AX
 	mov	cl, 5		; mask out the instruction's top 4 bits
-	rol	ax, cl		; and form a table offset
-	and	ax, 0x1e
-	mov	bx, ax		; bx = ([insn] & 0xf000) >> (16 - 4) << 1
-	jmp	[tXXXX+bx]
+	rol	bx, cl		; and form a table offset
+	and	bx, 0x1e	; bx = ([insn] & 0xf000) >> (16 - 4) << 1
+	mov	bx, ax
+	mov	si, reglo	; for use with the decode handlers
+	mov	di, oprC	; for use with the decode handlers
+				; which also assume that AX=insn
+	call	[dtXXXX+bx]	; decode operands
+	jmp	[htXXXX+bx]	; execute behaviour
 
 	section	.data
 	align	2
-	; first level jump table: decode the top 4 instruction bits
-tXXXX:	dw	h000		; 000XX shift immediate
+	; decoder jump table: decode the operands according
+	; to the top 4 instruction bits
+	; the decode handlers decode the various instruction fields and store
+	; their contents into the emulator state variables.
+dtXXXX:	dw	imm5rr		; 000XX imm5 / Rm / Rd
+	dw	d0001		; 000110 Rm / Rn / Rd
+				; 000111 imm3 / Rn / Rd
+	dw	rimm8		; 001XX Rdn / imm8
+	dw	rimm8
+	dw	d0100		; 010000 Rm / Rdn
+				; 010001 DN / rm / Rdn
+				; 01001 Rd / imm8
+	dw	rrr		; 0101 Rm / Rn / Rd
+	dw	imm5rr		; 011XX imm5 / Rn / Rd
+	dw	imm5rr
+	dw	imm5rr		; 1000X imm5 / Rn / Rd
+	dw	rimm8		; 1001X Rd / imm8
+	dw	rimm8		; 1010X Rd / imm8
+	dw	dnone		; 1011 misc. instructions
+	dw	rimm8		; 1100X Rn / imm8
+	dw	dnone		; 1101 cond / imm8
+	dw	dnone		; 11100 imm11
+				; 11101 32 bit instructions
+	dw	dnone		; 1111 32 bit instructions
+
+	; first level handler jump table: decode the top 4 instruction bits
+htXXXX:	dw	h000		; 000XX shift immediate
 	dw	h000		; 00011 add/subtract register/immediate
-	dw	h001		; 00100 add/subtract/compare/move immediate
+	dw	h001		; 001XX add/subtract/compare/move immediate
 	dw	h001
 	dw	h0100		; 010100XXXX data-processing register
 				; 010001XX special data processing
@@ -242,6 +283,103 @@ tXXXX:	dw	h000		; 000XX shift immediate
 	dw	h1111		; 11110 branch and misc. control
 
 	section	.text
+
+	; special decode handler for instructions starting with 0001
+	; 000XX... where XX != 11 is decoded as imm5 / reg / reg,
+	; 000110... as reg / reg / reg and
+	; 000111 as imm5 / reg / reg again
+d0001:	mov	cx, ax		; make a copy of insn
+	and	ch, 0xc		; mask the two bits 00001100
+	cmp	ch, 0x8		; are these set to 10?
+	je	rrr		; if yes, decode as rrr
+				; else fall through and decode as imm5rr
+
+	; decode handler for imm5 / reg / reg
+	; instruction layout: XXXXXAAAAABBBCCC
+	; for d000, we don't treat the 00011 opcodes specially;
+	; the handler for these instructions must manually decode the
+	; register from oprA
+imm5rr:	mov	cx, ax		; keep a copy of insn for later
+	and	ax, 0x7		; mask out operand C
+	shl	ax, 1		; form an offset into the register table
+	add	ax, si		; form a pointer to reglo[C]
+	stosw			; oprC = &reglo[C]
+	mov	ax, cx
+	and	ax, 0x38	; mask out operand B
+	shr	ax, 1
+	shr	ax, 1
+	add	ax, si
+	stosw			; oprB = &reglo[B]
+	xchg	ax, cx		; free CX for use with shr
+	mov	cl, 6		; prepare shift amount
+	shr	ax, cl		; shift immediate into place
+	and	ax, 0x1f	; and mask it out
+	stosw			; oprA = A
+	ret
+
+	; decode handler for reg / imm8
+	; instruction layout: XXXXXBBBCCCCCCCC
+rimm8:	xor	cx, cx
+	xchg	ah, cl		; AX=imm8, CX=reg
+	stosw			; oprC=imm8
+	xchg	ax, cx		; AX=reg
+	and	ax, 0x7		; mask out operand C
+	shl	ax, 1		; form an offset into the register table
+	add	ax, si		; form a pointer to reglo[B]
+	stosw			; oprB = &reglo[B]
+	ret
+
+	; decode handler for reg / reg / reg
+	; instruction layout: XXXXXXXAAABBBCCC
+rrr:	mov	cx, ax		; keep a copy of insn for later
+	and	ax, 0x7		; mask out operand C
+	shl	ax, 1		; form an offset into the register table
+	add	ax, si		; form a pointer to reglo[C]
+	stosw			; oprC = &reglo[C]
+	mov	ax, cx
+	and	ax, 0x38	; mask out operand B
+	shr	ax, 1
+	shr	ax, 1
+	add	ax, si
+	stosw			; oprB = &reglo[B]
+	xchg	ax, cx		; free CX for use with shr
+	mov	cl, 5		; prepare shift amount
+	shr	ax, cl		; shift operand A into place
+	and	ax, 0xe		; and mask it out
+	add	ax, si
+	stosw			; oprA = &reglo[A]
+	ret
+
+	; special decode handler for instructions starting with 0100
+	; 010000... is decoded as imm5 / reg / reg (imm4, really)
+	; 010001... is decoded in a special manner
+	; 01001... is decoded as reg / imm8
+d0100:	test	ah, 0x8		; is this 01001...?
+	jnz	rimm8		; if yes, decode as reg / imm8
+	test	ah, 0x4		; else, is this 010000...?
+	jz	imm5rr		; if yes, decode as imm5 / reg / reg
+
+	; if we get here, we have instruction 0100 01XX CBBB BCCC
+	; note how the C operand is split in two!
+	mov	cx, ax		; keep a copy of insn for later
+	shl	ax, 1		; AX = XXXX XXXC BBBB CCC0
+	shr	cx, 1
+	shr	cx, 1		; CX = 00XX XXXX XXCB BBB0
+	mov	dx, cx		; make a copy for masking
+	shr	dx, 1		; DX = 000X XXXX XXXC BBBB
+	and	dx, 0x10	; DX = 0000 0000 000C 0000
+	and	ax, 0x0e	; AX = 0000 0000 0000 CCC0
+	or	ax, dx		; AX = 0000 0000 000C CCC0
+	add	ax, si
+	stosw			; oprC = &reglo[C]
+	xchg	cx, ax
+	and	ax, 0x1e	; AX = 0000 0000 000B BBB0
+	add	ax, si
+	stosw			; oprB = &reglo[B]
+	; fallthrough
+
+	; decode handlers that perform no decoding
+dnone:	ret
 
 	; instruction handlers that have not been implemented yet
 h000:
