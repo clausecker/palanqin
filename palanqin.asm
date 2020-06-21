@@ -92,7 +92,6 @@ start:	mov	sp, end+stack	; beginning of stack
 .0:	mov	dx, di		; file name
 	mov	ax, 0x3d00	; AL=00 (open file for reading)
 	int	0x21		; 0x3d: OPEN EXISTING FILE
-	mov	[handle], ax	; remember file handle for later
 	jnc	.1		; did an error occur?
 
 	; opening, reading, or closing the file failed
@@ -103,7 +102,7 @@ start:	mov	sp, end+stack	; beginning of stack
 	jmp	.die		; and die
 
 	; opening the file was succesful: load program image
-.1:	xchg	bx, ax		; file handle
+.1:	xchg	bx, ax		; the file handle is needed in BX
 	mov	ax, sp
 	mov	dx, cs		; DX:AX = image base
 
@@ -125,7 +124,7 @@ start:	mov	sp, end+stack	; beginning of stack
 	jmp	.2		; and read some more data
 
 	; close the image file
-.eof:	mov	ah, 0x3e
+.eof:	mov	ah, 0x3e	; BX still contains the handle here
 	int	0x21		; 0x3e: CLOSE A FILE HANDLE
 	jc	.err
 
@@ -173,7 +172,6 @@ usage	db	"Usage: PALANQIN CORTEXM0.IMG", 0
 	section	.bss
 	align	2
 file	resw	1		; image file name
-handle	resw	1		; image file handle
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Emulator State                                                             ;;
@@ -205,13 +203,18 @@ run:	push	cs		; set up ds = cs
 	jmp	.step		; do it again and again
 
 	; simulate one instruction.  Assumes DS=CS.
-step:	les	si, [pcaddr]	; load the program counter into DS:SI
+step:	mov	bx, pcaddr	; save some bytes in the next few instructions
+	les	si, [bx]	; load the program counter into DS:SI
 	es	lodsw		; load an instruction
-	mov	[insn], ax	; remember a copy of the instruction in insn
-	mov	cl, 4
-	rol	ax, cl		; ax >> (15-4)
-	and	ax, 0x1e	; mask out the top 4 bits of the instruction
-	mov	bx, ax		; and use them to index a jump table
+	mov	[bx], ax	; update pcaddr with new offset
+	test	si, si		; did we overflow the segment?
+	jnz	.1		; if yes, apply overflow to pcaddr
+	add	byte [bx+3], 0x10
+.1:	mov	[insn], ax	; remember a copy of the instruction in insn
+	mov	cl, 5		; mask out the instruction's top 4 bits
+	rol	ax, cl		; and form a table offset
+	and	ax, 0x1e
+	mov	bx, ax		; bx = ([insn] & 0xf000) >> (16 - 4) << 1
 	jmp	[tXXXX+bx]
 
 	section	.data
