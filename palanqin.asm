@@ -226,6 +226,7 @@ step:	mov	bx, pcaddr	; save some bytes in the next few instructions
 	mov	cl, 5		; mask out the instruction's top 4 bits
 	rol	bx, cl		; and form a table offset
 	and	bx, 0x1e	; bx = ([insn] & 0xf000) >> (16 - 4) << 1
+	mov	dx, 0xe		; mask for use with the decode handlers
 	mov	si, reglo	; for use with the decode handlers
 	mov	di, oprC	; for use with the decode handlers
 				; which also assume that AX=insn
@@ -299,14 +300,14 @@ d0001:	mov	cx, ax		; make a copy of insn
 	; the handler for these instructions must manually decode the
 	; register from oprA
 imm5rr:	mov	cx, ax		; keep a copy of insn for later
-	and	ax, 0x7		; mask out operand C
 	shl	ax, 1		; form an offset into the register table
+	and	ax, dx		; mask out operand C
 	add	ax, si		; form a pointer to reglo[C]
 	stosw			; oprC = &reglo[C]
 	mov	ax, cx
-	and	ax, 0x38	; mask out operand B
 	shr	ax, 1
 	shr	ax, 1
+	and	ax, dx		; mask out operand B
 	add	ax, si
 	stosw			; oprB = &reglo[B]
 	xchg	ax, cx		; free CX for use with shr
@@ -323,7 +324,7 @@ rimm8:	xor	cx, cx
 	stosw			; oprC=imm8
 	xchg	ax, cx		; AX=reg
 	shl	ax, 1		; AX = XXXX XXXX XXXX BBB0
-	and	ax, 0xe		; AX = 0000 0000 0000 BBB0
+	and	ax, dx		; AX = 0000 0000 0000 BBB0
 	add	ax, si		; form a pointer to reglo[B]
 	stosw			; oprB = &reglo[B]
 	ret
@@ -331,20 +332,20 @@ rimm8:	xor	cx, cx
 	; decode handler for reg / reg / reg
 	; instruction layout: XXXXXXXAAABBBCCC
 rrr:	mov	cx, ax		; keep a copy of insn for later
-	and	ax, 0x7		; mask out operand C
 	shl	ax, 1		; form an offset into the register table
+	and	ax, dx		; mask out operand C
 	add	ax, si		; form a pointer to reglo[C]
 	stosw			; oprC = &reglo[C]
 	mov	ax, cx
-	and	ax, 0x38	; mask out operand B
 	shr	ax, 1
 	shr	ax, 1
+	and	ax, dx		; mask out operand B
 	add	ax, si
 	stosw			; oprB = &reglo[B]
 	xchg	ax, cx		; free CX for use with shr
 	mov	cl, 5		; prepare shift amount
 	shr	ax, cl		; shift operand A into place
-	and	ax, 0xe		; and mask it out
+	and	ax, dx		; and mask it out
 	add	ax, si
 	stosw			; oprA = &reglo[A]
 	ret
@@ -362,12 +363,12 @@ d0100:	test	ah, 0x8		; is this 01001...?
 	; note how the C operand is split in two!
 	mov	cx, ax		; keep a copy of insn for later
 	shl	ax, 1		; AX = XXXX XXXC BBBB CCC0
+	and	ax, dx		; AX = 0000 0000 0000 CCC0
 	shr	cx, 1
 	shr	cx, 1		; CX = 00XX XXXX XXCB BBB0
 	mov	dx, cx		; make a copy for masking
 	shr	dx, 1		; DX = 000X XXXX XXXC BBBB
 	and	dx, 0x10	; DX = 0000 0000 000C 0000
-	and	ax, 0x0e	; AX = 0000 0000 0000 CCC0
 	or	ax, dx		; AX = 0000 0000 000C CCC0
 	add	ax, si
 	stosw			; oprC = &reglo[C]
