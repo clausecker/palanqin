@@ -426,6 +426,10 @@ h1110:
 h1111:	int3
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Memory Access                                                              ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Address Space Conversion                                                   ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -461,8 +465,7 @@ pcseg:	strlo	ax, 15		; load PC into DX:AX
 	mov	ch, dh		; keep a copy of the top 4 bit of PC
 	call	linseg		; set up linear address in DX:AX
 	and	ch, 0xf0	; isolate address space nibble
-	test	ch, ch		; address space 0 (adjusted)?
-	jnz	.not0
+	jnz	.not0		; address space 0 (adjusted)?
 	add	dx, [imgbase]	; apply address space adjustment
 	jmp	.wb
 .not0:	cmp	ch, 2		; address space 2 (unadjusted)?
@@ -476,13 +479,30 @@ pcseg:	strlo	ax, 15		; load PC into DX:AX
 
 	; determine the linear address of the current instruction from pcaddr
 	; and load it into PC.  It is assumed that PC points into the right
-	; address space already.  Trashes CX.  Assumes DS=CS.
+	; address space already.  Trashes AX, BX, CX, and DX.  Assumes DS=CS.
 	; Note that as this function is called after pcaddr has been incremented
 	; to point right past the current instruction, there is a certain
 	; asymmetry to pcseg which assumes that R15 points directly to the
 	; instruction to execute.  As usual on ARM, R15 is updated to point
-	; four bytes ahead of the current instruction.
-pclin:	int3			; TODO
+	; 4 bytes ahead of the current instruction, ie. 2 bytes ahead of pcaddr.
+pclin:	mov	ax, [pcaddr]	; DX:AX = pcaddr
+	mov	dx, [pcaddr+2]
+	strhi	bh, 1+15	; load R15 high byte into BH
+	and	bx, 0xf000	; isolate address space nibble
+	jnz	.not0		; address space 0 (adjusted)?
+	sub	dx, [imgbase]	; remove address space adjustment
+	jmp	.wb
+.not0:	cmp	bh, 2		; address space 2 (unadjusted)?
+	jne	.wild		; if not, this address cannot be translated
+.wb:	call	seglin		; convert into a linear address
+	add	ax, 2		; advance to current insn + 4
+	adc	dx, bx		; and apply address space nibble
+	ldrlo	15, ax		; write DX:AX to R15
+	ldrhi	15, dx
+	ret
+
+.wild:	int3			; TODO: generate an exception or something
+	jmp	.wild		; endless loop
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; IO Routines                                                                ;;
