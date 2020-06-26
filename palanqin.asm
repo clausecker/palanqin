@@ -231,6 +231,7 @@ step:	mov	bx, pcaddr	; save some bytes in the next few instructions
 	mov	di, oprC	; for use with the decode handlers
 				; which also assume that AX=insn
 	call	[dtXXXX+bx]	; decode operands
+	mov	ax, [insn]	; for use with behaviour handlers
 	jmp	[htXXXX+bx]	; execute behaviour
 
 	section	.data
@@ -259,28 +260,6 @@ dtXXXX:	dw	imm5rr		; 000XX imm5 / Rm / Rd
 	dw	dnone		; 11100 imm11
 				; 11101 32 bit instructions
 	dw	dnone		; 1111 32 bit instructions
-
-	; first level handler jump table: decode the top 4 instruction bits
-htXXXX:	dw	h000		; 000XX shift immediate
-	dw	h000		; 00011 add/subtract register/immediate
-	dw	h001		; 001XX add/subtract/compare/move immediate
-	dw	h001
-	dw	h0100		; 010100XXXX data-processing register
-				; 010001XX special data processing
-				; 01001 LDR  (literal pool)
-	dw	h0101		; 0101 load/store register offset
-	dw	h011 		; 011XX load/store word/byte immediate offset
-	dw	h011
-	dw	h1000		; 1000X load/store halfword immediate offset
-	dw	h1001		; 1001X load from/store to stack
-	dw	h1010		; 1010X add to SP or PC
-	dw	h1011		; 1011XXXX miscellaneous instructions
-	dw	h1100		; 1100X load/store multiple
-	dw	h1101		; 1101XXXX conditional branch
-				; 11011110 undefined instruction
-				; 11011111 service call
-	dw	h1110		; 11100 B (unconditional branch)
-	dw	h1111		; 11110 branch and misc. control
 
 	section	.text
 
@@ -381,6 +360,57 @@ d0100:	test	ah, 0x8		; is this 01001...?
 	; decode handlers that perform no decoding
 dnone:	ret
 
+	section	.data
+	align	2
+
+	; first level handler jump table: decode the top 4 instruction bits
+htXXXX:	dw	h000		; 000XX shift immediate
+	dw	h000		; 00011 add/subtract register/immediate
+	dw	h001		; 001XX add/subtract/compare/move immediate
+	dw	h001
+	dw	h0100		; 010100XXXX data-processing register
+				; 010001XX special data processing
+				; 01001 LDR  (literal pool)
+	dw	h0101		; 0101 load/store register offset
+	dw	h011 		; 011XX load/store word/byte immediate offset
+	dw	h011
+	dw	h1000		; 1000X load/store halfword immediate offset
+	dw	h1001		; 1001X load from/store to stack
+	dw	h1010		; 1010X add to SP or PC
+	dw	h1011		; 1011XXXX miscellaneous instructions
+	dw	h1100		; 1100X load/store multiple
+	dw	h1101		; 1101XXXX conditional branch
+				; 11011110 undefined instruction
+				; 11011111 service call
+	dw	h1110		; 11100 B (unconditional branch)
+	dw	h1111		; 11110 branch and misc. control
+
+	section	.text
+
+	; 10100BBBCCCCCCCC ADD Rd, PC, #imm8 (ADR Rd, label)
+	; 10101BBBCCCCCCCC ADD Rd, SP, #imm8
+h1010:	test	ah, 0x8		; is this ADD Rd, SP, #imm8?
+	jnz	.sp		; if not, this is ADD Rd, PC, #imm8
+
+	call	pclin		; set up R15 to the right program
+				; counter
+	strlo	cx, 15		; load PC into DX:CX
+	strhi	dx, 15
+	jmp	.fi
+
+.sp:	strlo	cx, 13		; load SP into DX:CX
+	strhi	dx, 13
+
+.fi:	mov	ah, 0		; AX = #imm8
+	shl	ax, 1
+	shl	ax, 1		; AX = #imm8
+	add	ax, cx		; DX:AX == DX:CX + AX
+	adc	dx, 0
+	mov	di, [oprB]	; di = &Rd
+	mov	[di], ax	; Rd = DX:AX
+	mov	[di+hi], dx
+	ret
+
 	; instruction handlers that have not been implemented yet
 h000:
 h001:
@@ -389,7 +419,6 @@ h0101:
 h011:
 h1000:
 h1001:
-h1010:
 h1011:
 h1100:
 h1101:
@@ -425,21 +454,21 @@ linseg:	and	dx, 0xf
 	ret
 
 	; determine the segmented address of the current instruction from PC
-	; and load it into pcaddr.  Trashes CX.  If PC cannot be represented as
-	; an address, an exception is caused.
-pcseg:	strlo	ax, cs:15	; load PC into DX:AX
-	strhi	dx, cs:15
+	; and load it into pcaddr.  Trashes CX.  Assumes DS=CS.
+	; If PC cannot be represented as an address, an exception is caused.
+pcseg:	strlo	ax, 15		; load PC into DX:AX
+	strhi	dx, 15
 	mov	ch, dh		; keep a copy of the top 4 bit of PC
 	call	linseg		; set up linear address in DX:AX
 	and	ch, 0xf0	; isolate address space nibble
 	test	ch, ch		; address space 0 (adjusted)?
 	jnz	.not0
-	add	dx, [cs:imgbase]; apply address space adjustment
+	add	dx, [imgbase]	; apply address space adjustment
 	jmp	.wb
 .not0:	cmp	ch, 2		; address space 2 (unadjusted)?
 	jne	.wild		; if not, this address cannot be translated
-.wb:	mov	[cs:pcaddr], ax	; set up translated PC with DX:AX
-	mov	[cs:pcaddr+2], dx
+.wb:	mov	[pcaddr], ax	; set up translated PC with DX:AX
+	mov	[pcaddr+2], dx
 	ret
 
 .wild:	int3			; TODO: generate an exception or something
@@ -447,7 +476,13 @@ pcseg:	strlo	ax, cs:15	; load PC into DX:AX
 
 	; determine the linear address of the current instruction from pcaddr
 	; and load it into PC.  It is assumed that PC points into the right
-	; address space already.  Trashes CX.  If 
+	; address space already.  Trashes CX.  Assumes DS=CS.
+	; Note that as this function is called after pcaddr has been incremented
+	; to point right past the current instruction, there is a certain
+	; asymmetry to pcseg which assumes that R15 points directly to the
+	; instruction to execute.  As usual on ARM, R15 is updated to point
+	; four bytes ahead of the current instruction.
+pclin:	int3			; TODO
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; IO Routines                                                                ;;
