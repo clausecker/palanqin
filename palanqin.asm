@@ -17,7 +17,7 @@ edata	equ	$		; must be the first thing in .bss
 stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Macros                                                                     ;;
+;; Macros and Constants                                                       ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	; load value into ARM register
@@ -37,6 +37,12 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 %macro	strhi	2
 	mov	%1, [%2*2+reghi]
 %endmacro
+
+	; 8086 flags (those we find useful)
+CF	equ	0x0001
+ZF	equ	0x0040
+SF	equ	0x0080
+OF	equ	0x0800
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Startup and Initialisation                                                 ;;
@@ -189,7 +195,6 @@ pcaddr	resd	1		; location of the next instruction as a segment/
 				; performance.
 imgbase	resw	1		; emulator image base segment
 flags	resw	1		; CPU flags in 8086 format
-insn	resw	1		; the currently executed instruction
 
 	; instruction decoding state variables
 	; immediate operands are zero/sign-extended to 16 bit
@@ -221,8 +226,8 @@ step:	mov	bx, pcaddr	; save some bytes in the next few instructions
 	test	si, si		; did we overflow the segment?
 	jnz	.1		; if yes, apply overflow to pcaddr
 	add	byte [bx+3], 0x10
-.1:	mov	[insn], ax	; remember a copy of the instruction in insn
-	mov	bx, ax		; and in AX
+.1:	push	ax		; push a copy of the current instruction
+	mov	bx, ax		; and keep another one in AX
 	mov	cl, 5		; mask out the instruction's top 4 bits
 	rol	bx, cl		; and form a table offset
 	and	bx, 0x1e	; bx = ([insn] & 0xf000) >> (16 - 4) << 1
@@ -231,11 +236,12 @@ step:	mov	bx, pcaddr	; save some bytes in the next few instructions
 	mov	di, oprC	; for use with the decode handlers
 				; which also assume that AX=insn
 	call	[dtXXXX+bx]	; decode operands
-	mov	ax, [insn]	; for use with behaviour handlers
+	pop	ax		; the current instruction
 	jmp	[htXXXX+bx]	; execute behaviour
 
 	section	.data
 	align	2
+
 	; decoder jump table: decode the operands according
 	; to the top 4 instruction bits
 	; the decode handlers decode the various instruction fields and store
@@ -385,7 +391,103 @@ htXXXX:	dw	h000		; 000XX shift immediate
 	dw	h1110		; 11100 B (unconditional branch)
 	dw	h1111		; 11110 branch and misc. control
 
+	; jump table for instructions 000XXX
+	; we decode the MSB of the immediate because shifting by 16 or more
+	; places generally requires different code than shifting by less
+ht000:	dw	h000000		; LSL immediate (< 16)
+	dw	h000001		; LSL immediate (> 15)
+	dw	h000010		; LSR immediate (< 16)
+	dw	h000011		; LSR immediate (> 15)
+	dw	h000100		; ASR immediate (< 16)
+	dw	h000101		; ASR immediate (> 15)
+	dw	h000110		; ADD/SUB register
+	dw	h000111		; ADD/SUB immediate
+
+	; jump table for instructions 000XX where imm8 == 0
+	; this requires special treatment as some shifts treat a 0
+	; immediate as 32 while others treat it as 0.
+ht000z:	dw	h00000z		; MOVS Rd, Rm
+	dw	h00001z		; LSRS Rd, Rm, #32
+	dw	h00010z		; ASRS Rd, Rm, #32
+	dw	h000110		; ADD/SUB register
+
 	section	.text
+
+	; 000XXAAAAABBBCCC shift immediate
+	; 00011XYAAABBBCCC add/subtract register/immediate
+h000:	mov	bl, ah		; BL = 000XXAAA
+	shr	bl, 1		; BL = 0000XXAA
+	and	bx, 0xe		; BL = 0000XXA0
+	mov	si, [oprB]	; SI = &reglo[Rm]
+	mov	di, [oprC]	; DI = &reglo[Rd]
+	mov	cl, [oprA]	; CL = imm5
+	test	cl, cl		; is imm8 == 0?
+	jz	.zero		; if yes, perform special handling
+	jmp	[ht000+bx]	; call instruction specific handler
+
+.zero:	shr	bl, 1		; BL = 00000XX0
+	jmp	[ht000z+bx]	; call handler for imm8 = 0
+
+	; 0000000000BBBCCC MOVS Rd, Rm
+	; CV is preserved, NZ are set according to Rm
+h00000z:mov	al, [flags]	; load CF, SF, and ZF into AL
+	and	al, CF		; and preserve CF
+	mov	dx, [si+hi]	; DX = Rm(hi)
+	mov	[di+hi], dx	; Rd(hi) = DX
+	test	dx, dx		; set flags based on Rd(hi)
+	lahf			; copy them to ah (CF is clear here)
+	or	al, ah		; and accumulate
+	mov	dx, [si]	; DX = Rm(lo)
+	mov	[di], dx	; Rd(lo) = DX
+	test	dx, dx		; set flags based on Rd(lo)
+	lahf			; copy them to ah
+	or	ah, ~ZF		; isolate the zero flag
+	or	al, ah		; set ZF if Rd(lo) == Rd(hi) == 0
+	mov	[flags], al	; update CF, ZF, and SF
+	ret
+
+	; 000000AAAABBBCCC LSLS Rd, #imm8 where 0 < imm8 < 16
+	; V must be preserved and CNZ set (whew)
+h000000:mov	bx, [si]	; DX = Rm(lo)
+	mov	dx, bx		; keep a copy
+	mov	si, [si+hi]	; SI = Rm(hi)
+	shl	bx, cl		; BX = Rm(lo) << imm8
+	mov	[di], bx	; Rd(lo) = Rm(lo) << imm8
+	lahf			; load ZF(lo) based on Rd(lo)
+	mov	al, ah		; into AL
+	or	al, ~ZF		; isolate ZF
+	shl	si, cl		; SI = Rm(hi) << imm8
+	lahf			; remember CF, SF, and ZF(hi)
+	and	al, ah		; and set ZF = Zf(lo) & ZF(hi)
+	mov	[flags], al	; deposit ZF, CF, and SF into flags
+	sub	cl, 16
+	neg	cl		; CL = 16 - imm8
+	shr	dx, cl		; DX = Rm(lo) >> 16 - imm8
+	or	dx, si		; DX = Rm(hi) << imm8 | Rm(lo) >> 16 - imm8
+				;    = Rm << imm8 (hi)
+	mov	[di+hi], dx	; deposit into Rd(hi)
+	ret
+
+h000001:; 000001AAAABBBCCC LSLS Rd, #imm8 where imm8 > 16
+h000001:sub	cl, 16		; CL = imm8 - 16
+	mov	dx, [si]	; BX = Rm(lo)
+	test	dx, dx		; make sure flags are set even if CL=0
+	shl	dx, cl		; DX = Rm(lo) << imm8 - 16
+	lahf			; load CF, SF, and ZF into AH
+	mov	word [di], 0	; Rd(lo) = 0
+	mov	[di+hi], dx	; Rd(hi) = Rm(lo) << imm8 - 16
+	mov	[flags], ah	; update flags except for OF
+	ret
+
+h00001z:
+h000010:
+h000011:
+h00010z:
+h000100:
+h000101:
+h00011z:
+h000110:
+h000111:int3			; TODO
 
 	; 10100BBBCCCCCCCC ADD Rd, PC, #imm8 (ADR Rd, label)
 	; 10101BBBCCCCCCCC ADD Rd, SP, #imm8
@@ -412,7 +514,6 @@ h1010:	test	ah, 0x8		; is this ADD Rd, SP, #imm8?
 	ret
 
 	; instruction handlers that have not been implemented yet
-h000:
 h001:
 h0100:
 h0101:
@@ -496,7 +597,7 @@ pclin:	mov	ax, [pcaddr]	; DX:AX = pcaddr
 	jne	.wild		; if not, this address cannot be translated
 .wb:	call	seglin		; convert into a linear address
 	add	ax, 2		; advance to current insn + 4
-	adc	dx, bx		; and apply address space nibble
+	adc	dx, bx		; carry and apply address space nibble
 	ldrlo	15, ax		; write DX:AX to R15
 	ldrhi	15, dx
 	ret
