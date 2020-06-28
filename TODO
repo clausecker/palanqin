@@ -2,5 +2,7 @@ Currently implemented instructions:
 
     ADD  Rd, SP, #imm8
     ADD  Rd, PC, #imm8
+    ASRS Rd, Rm, #32
     LSLS Rd, Rm, #imm5
+    LSRS Rd, Rm, #32
     MOVS Rd, Rm

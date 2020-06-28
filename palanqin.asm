@@ -195,6 +195,7 @@ pcaddr	resd	1		; location of the next instruction as a segment/
 				; performance.
 imgbase	resw	1		; emulator image base segment
 flags	resw	1		; CPU flags in 8086 format
+				; only CF, ZF, SF, and OF are meaningful
 
 	; instruction decoding state variables
 	; immediate operands are zero/sign-extended to 16 bit
@@ -446,7 +447,7 @@ h00000z:mov	al, [flags]	; load CF, SF, and ZF into AL
 	mov	[flags], al	; update CF, ZF, and SF
 	ret
 
-	; 000000AAAABBBCCC LSLS Rd, #imm8 where 0 < imm8 < 16
+	; 000000AAAABBBCCC LSLS Rd, Rm, #imm8 where 0 < imm8 < 16
 	; V must be preserved and CNZ set (whew)
 h000000:mov	bx, [si]	; DX = Rm(lo)
 	mov	dx, bx		; keep a copy
@@ -468,7 +469,7 @@ h000000:mov	bx, [si]	; DX = Rm(lo)
 	mov	[di+hi], dx	; deposit into Rd(hi)
 	ret
 
-h000001:; 000001AAAABBBCCC LSLS Rd, #imm8 where imm8 > 16
+	; 000001AAAABBBCCC LSLS Rd, Rm, #imm8 where imm8 > 16
 h000001:sub	cl, 16		; CL = imm8 - 16
 	mov	dx, [si]	; BX = Rm(lo)
 	test	dx, dx		; make sure flags are set even if CL=0
@@ -479,10 +480,29 @@ h000001:sub	cl, 16		; CL = imm8 - 16
 	mov	[flags], ah	; update flags except for OF
 	ret
 
-h00001z:
+	; 0000100000BBBCCC LSRS Rd, Rm, #32
+h00001z:xor	ax, ax
+	mov	[di], ax	; Rd = 0
+	mov	[di+hi], ax
+	mov	al, [si+hi+1]   ; AL = Rd >> 24
+	and	al, 0x80	; AL = Rd < 0 ? 0x80 : 0x00
+	rol	al, 1		; AL = Rd < 0 ? 1 : 0
+	or	al, ZF		; AL = Rd < 0 ? {ZF, CF} : {ZF}
+	mov	[flags], al
+	ret
+
+	; 0001000000BBBCCC ASRS Rd, Rm, #32
+h00010z:cmp	byte [si+hi+1], 0x80 ; CF = Rm > 0
+	cmc			; CF = Rm < 0
+	sbb	ax, ax		; AX = Rm > 0 ? -1 : 0 (== Rm >> 32)
+	mov	[di], ax	; store result to Rd
+	mov	[di+hi], ax
+	xor	al, ZF		; Rm < 0: CF, SF; Rd >= 0: ZF
+	mov	[flags], al	; update CF, SF, and ZF in flags
+	ret
+
 h000010:
 h000011:
-h00010z:
 h000100:
 h000101:
 h00011z:
