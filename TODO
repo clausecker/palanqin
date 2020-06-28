@@ -1,0 +1,6 @@
+Currently implemented instructions:
+
+    ADD  Rd, SP, #imm8
+    ADD  Rd, PC, #imm8
+    LSLS Rd, Rm, #imm5
+    MOVS Rd, Rm
