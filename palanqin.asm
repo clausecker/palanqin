@@ -447,49 +447,51 @@ h00000z:mov	al, [flags]	; load CF, SF, and ZF into AL
 	mov	[flags], al	; update CF, ZF, and SF
 	ret
 
-	; 000000AAAABBBCCC LSLS Rd, Rm, #imm8 where 0 < imm8 < 16
+	; 000000AAAABBBCCC LSLS Rd, Rm, #imm5 where 0 < imm5 < 16
 	; V must be preserved and CNZ set (whew)
 h000000:mov	bx, [si]	; DX = Rm(lo)
 	mov	dx, bx		; keep a copy
 	mov	si, [si+hi]	; SI = Rm(hi)
-	shl	bx, cl		; BX = Rm(lo) << imm8
-	mov	[di], bx	; Rd(lo) = Rm(lo) << imm8
+	shl	bx, cl		; BX = Rm(lo) << imm5
+	mov	[di], bx	; Rd(lo) = Rm(lo) << imm5
 	lahf			; load ZF(lo) based on Rd(lo)
 	mov	al, ah		; into AL
 	or	al, ~ZF		; isolate ZF
-	shl	si, cl		; SI = Rm(hi) << imm8
+	shl	si, cl		; SI = Rm(hi) << imm5
 	lahf			; remember CF, SF, and ZF(hi)
 	and	al, ah		; and set ZF = Zf(lo) & ZF(hi)
 	mov	[flags], al	; deposit ZF, CF, and SF into flags
 	sub	cl, 16
-	neg	cl		; CL = 16 - imm8
-	shr	dx, cl		; DX = Rm(lo) >> 16 - imm8
-	or	dx, si		; DX = Rm(hi) << imm8 | Rm(lo) >> 16 - imm8
-				;    = Rm << imm8 (hi)
+	neg	cl		; CL = 16 - imm5
+	shr	dx, cl		; DX = Rm(lo) >> 16 - imm5
+	or	dx, si		; DX = Rm(hi) << imm5 | Rm(lo) >> 16 - imm5
+				;    = Rm << imm5(hi)
 	mov	[di+hi], dx	; deposit into Rd(hi)
 	ret
 
-	; 000001AAAABBBCCC LSLS Rd, Rm, #imm8 where imm8 > 16
-h000001:sub	cl, 16		; CL = imm8 - 16
+	; 000001AAAABBBCCC LSLS Rd, Rm, #imm5 where imm5 > 16
+h000001:sub	cl, 16		; CL = imm5 - 16
 	mov	dx, [si]	; BX = Rm(lo)
 	test	dx, dx		; make sure flags are set even if CL=0
-	shl	dx, cl		; DX = Rm(lo) << imm8 - 16
-	lahf			; load CF, SF, and ZF into AH
+	shl	dx, cl		; DX = Rm(lo) << imm5 - 16
 	mov	word [di], 0	; Rd(lo) = 0
-	mov	[di+hi], dx	; Rd(hi) = Rm(lo) << imm8 - 16
+	mov	[di+hi], dx	; Rd(hi) = Rm(lo) << imm5 - 16
+	lahf			; load CF, SF, and ZF into AH
 	mov	[flags], ah	; update flags except for OF
 	ret
 
 	; 0000100000BBBCCC LSRS Rd, Rm, #32
-h00001z:xor	ax, ax
+h00001z:mov	ax, 0x80
+	and	al, [si+hi+1]	; AL = Rd < 0 ? 0x80 : 0
+	shl	al, 1		; AX = 0, flags = Rd < 0 ? {ZF, CF} : {ZF}
 	mov	[di], ax	; Rd = 0
 	mov	[di+hi], ax
-	mov	al, [si+hi+1]   ; AL = Rd >> 24
-	and	al, 0x80	; AL = Rd < 0 ? 0x80 : 0x00
-	rol	al, 1		; AL = Rd < 0 ? 1 : 0
-	or	al, ZF		; AL = Rd < 0 ? {ZF, CF} : {ZF}
-	mov	[flags], al
+	lahf			; update CF, SF, and ZF in flags
+	mov	[flags], ah
 	ret
+
+	; 000010AAAABBBCCC LSRS Rd, Rm #imm5 where imm5 < 16
+h000010:
 
 	; 0001000000BBBCCC ASRS Rd, Rm, #32
 h00010z:mov	ah, [si+hi+1]	; AH = Rd(hi) (high byte)
@@ -501,7 +503,6 @@ h00010z:mov	ah, [si+hi+1]	; AH = Rd(hi) (high byte)
 	mov	[flags], ah
 	ret
 
-h000010:
 h000011:
 h000100:
 h000101:
