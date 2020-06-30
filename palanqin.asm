@@ -492,13 +492,13 @@ h00001z:xor	ax, ax
 	ret
 
 	; 0001000000BBBCCC ASRS Rd, Rm, #32
-h00010z:cmp	byte [si+hi+1], 0x80 ; CF = Rm > 0
-	cmc			; CF = Rm < 0
-	sbb	ax, ax		; AX = Rm > 0 ? -1 : 0 (== Rm >> 32)
-	mov	[di], ax	; store result to Rd
-	mov	[di+hi], ax
-	xor	al, ZF		; Rm < 0: CF, SF; Rd >= 0: ZF
-	mov	[flags], al	; update CF, SF, and ZF in flags
+h00010z:mov	ah, [si+hi+1]	; AH = Rd(hi) (high byte)
+	cwd			; DX = Rd < 0 ? -1 : 0
+	sar	dx, 1		; set flags depending on DX
+	mov	[di], dx	; store result to Rd
+	mov	[di+hi], dx
+	lahf			; update CF, SF, and ZF in flags
+	mov	[flags], ah
 	ret
 
 h000010:
@@ -514,8 +514,7 @@ h000111:int3			; TODO
 h1010:	test	ah, 0x8		; is this ADD Rd, SP, #imm8?
 	jnz	.sp		; if not, this is ADD Rd, PC, #imm8
 
-	call	pclin		; set up R15 to the right program
-				; counter
+	call	pclin		; set up R15 to the right program counter
 	strlo	cx, 15		; load PC into DX:CX
 	strhi	dx, 15
 	jmp	.fi
