@@ -196,6 +196,9 @@ pcaddr	resd	1		; location of the next instruction as a segment/
 imgbase	resw	1		; emulator image base segment
 flags	resw	1		; CPU flags in 8086 format
 				; only CF, ZF, SF, and OF are meaningful
+zsreg	resw	1		; pointer to reglo according to which the zero
+				; and sign flags shall be set or 0 if they are
+				; already set up correctly.
 
 	; instruction decoding state variables
 	; immediate operands are zero/sign-extended to 16 bit
@@ -421,6 +424,7 @@ h000:	mov	bl, ah		; BL = 000XXAAA
 	and	bx, 0xe		; BL = 0000XXA0
 	mov	si, [oprB]	; SI = &reglo[Rm]
 	mov	di, [oprC]	; DI = &reglo[Rd]
+	mov	[zsreg], di	; set SF and ZF according to Rd
 	mov	cl, [oprA]	; CL = imm5
 	test	cl, cl		; is imm8 == 0?
 	jz	.zero		; if yes, perform special handling
@@ -431,20 +435,10 @@ h000:	mov	bl, ah		; BL = 000XXAAA
 
 	; 0000000000BBBCCC MOVS Rd, Rm
 	; CV is preserved, NZ are set according to Rm
-h00000z:mov	al, [flags]	; load CF, SF, and ZF into AL
-	and	al, CF		; and preserve CF
-	mov	dx, [si+hi]	; DX = Rm(hi)
-	mov	[di+hi], dx	; Rd(hi) = DX
-	test	dx, dx		; set flags based on Rd(hi)
-	lahf			; copy them to ah (CF is clear here)
-	or	al, ah		; and accumulate
-	mov	dx, [si]	; DX = Rm(lo)
-	mov	[di], dx	; Rd(lo) = DX
-	test	dx, dx		; set flags based on Rd(lo)
-	lahf			; copy them to ah
-	or	ah, ~ZF		; isolate the zero flag
-	or	al, ah		; set ZF if Rd(lo) == Rd(hi) == 0
-	mov	[flags], al	; update CF, ZF, and SF
+h00000z:lodsw			; Rd(lo) = Rm(lo)
+	stosw
+	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	mov	[di+hi-2], ax	; Rm(hi) = AX
 	ret
 
 	; 000000AAAABBBCCC LSLS Rd, Rm, #imm5 where 0 < imm5 < 16
@@ -575,21 +569,22 @@ h1010:	test	ah, 0x8		; is this ADD Rd, SP, #imm8?
 	jnz	.sp		; if not, this is ADD Rd, PC, #imm8
 
 	call	pclin		; set up R15 to the right program counter
-	strlo	cx, 15		; load PC into DX:CX
-	strhi	dx, 15
+	strlo	cx, 15		; load PC into BX:CX
+	strhi	bx, 15
 	jmp	.fi
 
-.sp:	strlo	cx, 13		; load SP into DX:CX
-	strhi	dx, 13
+.sp:	strlo	cx, 13		; load SP into BX:CX
+	strhi	bx, 13
 
-.fi:	mov	ah, 0		; AX = #imm8
+.fi:	mov	ah, 0		; AX = #imm8 >> 2
 	shl	ax, 1
 	shl	ax, 1		; AX = #imm8
-	add	ax, cx		; DX:AX == DX:CX + AX
-	adc	dx, 0
+	add	cx, ax		; BX:CX == BX:CX + AX (= PC/SP + #imm8)
+	adc	bx, 0
 	mov	di, [oprB]	; di = &Rd
-	mov	[di], ax	; Rd = DX:AX
-	mov	[di+hi], dx
+	call	fixRd		; fix up Rd if needed
+	mov	[di], cx	; Rd = BX:CX
+	mov	[di+hi], bx
 	ret
 
 	; instruction handlers that have not been implemented yet
@@ -604,6 +599,41 @@ h1100:
 h1101:
 h1110:
 h1111:	int3
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Flag Manipulation                                                          ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	; set ZF and SF in flags according to zsreg
+	; trashes AX, DX, and SI
+fixflags:
+	mov	si, [zsreg]
+	test	si, si		; flags already fixed?
+	jz	.nofix
+.entry:	xor	dx, dx
+	cmp	[si], dx	; set ZF according to R(lo)
+	lahf
+	mov	al, ah		; AL = R(lo) flags
+	cmp	[si+hi], dx	; set ZF according to R(hi)
+	or	al, ~ZF		; isolate ZF in AL
+	and	ah, al		; AH = SF, ZF according to R
+	mov	al, [flags]
+	and	ax, ~(ZF|SF)<<8|ZF|SF
+				; mask AL to just ZF and SF, AH to all but
+				; ZF and SF
+	or	al, ah		; merge the two
+	mov	[flags], al	; write them back
+	mov	[zsreg], dx	; and mark the flags as being fixed
+.nofix:	ret
+
+	; compare DI with [zsreg].  If both are equal, fix the flags.
+	; trashes AX, DX, and SI.  Preserves DI which may not be zero.
+	; the intent is to save the flags if Rd == [zsreg] and flag
+	; recovery would otherwise be impossible.
+fixRd:	mov	si, [zsreg]
+	cmp	si, di		; is Rd == [zsreg]?
+	je	fixflags.entry	; if yes, fix it up
+	ret			; otherwise, go back to caller
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Memory Access                                                              ;;
