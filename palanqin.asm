@@ -413,7 +413,7 @@ ht000:	dw	h000000		; LSL immediate (< 16)
 ht000z:	dw	h00000z		; MOVS Rd, Rm
 	dw	h00001z		; LSRS Rd, Rm, #32
 	dw	h00010z		; ASRS Rd, Rm, #32
-	dw	h000110		; ADD/SUB register
+	dw	h000110		; ADDS Rd, Rm, R0
 
 	section	.text
 
@@ -425,7 +425,7 @@ h000:	mov	bl, ah		; BL = 000XXAAA
 	mov	si, [oprB]	; SI = &reglo[Rm]
 	mov	di, [oprC]	; DI = &reglo[Rd]
 	mov	[zsreg], di	; set SF and ZF according to Rd
-	mov	cl, [oprA]	; CL = imm5
+	mov	cx, [oprA]	; CL = imm5 (or Rm for 000110...)
 	test	cl, cl		; is imm8 == 0?
 	jz	.zero		; if yes, perform special handling
 	jmp	[ht000+bx]	; call instruction specific handler
@@ -544,23 +544,55 @@ h000101:sub	cl, 16		; CL = imm5 - 16
 	mov	[flags], dl	; update CF in flags
 	ret
 
-h00011z:
-h000110:
-h000111:int3			; TODO
+	; 0001100AAABBBCCC ADDS Rd, Rn, Rm
+	; 0001101AAABBBCCC SUBS Rd, Rn, Rm
+h000110:mov	bx, cx		; need BX to form an address
+	mov	cx, [si]	; DX:CX = Rn
+	mov	dx, [si+hi]
+	test	ah, 2		; is this ADDS or SUBS?
+	jnz	.subs
+	add	cx, [bx]	; DX:CX = Rn + Rm
+	adc	dx, [bx+hi]
+	jmp	.fi
+.subs:	sub	cx, [bx]	; DX:CX = Rn - Rm
+	sbb	dx, [bx+hi]
+	cmc			; adjust CF to ARM conventions
+.fi:	mov	[di], cx	; Rd = DX:CX
+	mov	[di+hi], dx
+	pushf			; remember all flags
+	pop	word [flags]
+	ret
+
+	; 0001110AAABBBCCC ADDS Rd, Rn, #imm3
+	; 0001111AAABBBCCC SUBS Rd, Rn, #imm3
+h000111:and	cx, 7		; CX = #imm3
+	test	ah, 2		; is this ADDS or SUBS?
+	jnz	.subs
+	xor	ax, ax
+	add	cx, [si]	; AX:CX = Rn + #imm3
+	adc	ax, [si+hi]
+	jmp	.fi
+.subs:	mov	dx, [si]	; AX:DX = Rn
+	mov	ax, [si+hi]
+	sub	dx, cx		; AX:DX = Rn - #imm3
+	sbb	ax, 0
+	cmc			; adjust CF to ARM conventions
+.fi:	mov	[di], dx	; Rd = AX:DX
+	mov	[di+hi], ax
+	pushf			; remember all flags
+	pop	word [flags]
+	ret
 
 	; 10100BBBCCCCCCCC ADD Rd, PC, #imm8 (ADR Rd, label)
 	; 10101BBBCCCCCCCC ADD Rd, SP, #imm8
 h1010:	test	ah, 0x8		; is this ADD Rd, SP, #imm8?
 	jnz	.sp		; if not, this is ADD Rd, PC, #imm8
-
 	call	pclin		; set up R15 to the right program counter
 	strlo	cx, 15		; load PC into BX:CX
 	strhi	bx, 15
 	jmp	.fi
-
 .sp:	strlo	cx, 13		; load SP into BX:CX
 	strhi	bx, 13
-
 .fi:	mov	ah, 0		; AX = #imm8 >> 2
 	shl	ax, 1
 	shl	ax, 1		; AX = #imm8
