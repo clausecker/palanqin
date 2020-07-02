@@ -5,6 +5,7 @@ Currently implemented instructions:
     ADDS Rd, Rn, #imm3
     ADDS Rd, Rn, Rm
     ASRS Rd, Rm, #imm5
+    B<c> label
     LSLS Rd, Rm, #imm5
     LSRS Rd, Rm, #imm5
     MOVS Rd, Rm

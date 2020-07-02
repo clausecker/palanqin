@@ -198,7 +198,7 @@ flags	resw	1		; CPU flags in 8086 format
 				; only CF, ZF, SF, and OF are meaningful
 zsreg	resw	1		; pointer to reglo according to which the zero
 				; and sign flags shall be set or 0 if they are
-				; already set up correctly.
+				; already set up correctly.  This is never R15.
 
 	; instruction decoding state variables
 	; immediate operands are zero/sign-extended to 16 bit
@@ -224,9 +224,11 @@ run:	push	cs		; set up es = ds = cs
 
 	; simulate one instruction.  Assumes ES=DS=CS.
 step:	mov	bx, pcaddr	; save some bytes in the next few instructions
-	les	si, [bx]	; load the program counter into DS:SI
-	es	lodsw		; load an instruction
-	mov	[bx], ax	; update pcaddr with new offset
+	push	ds		; remember DS to free a segment selector
+	lds	si, [bx]	; load the program counter into DS:SI
+	lodsw			; load an instruction
+	pop	ds		; restore DS=CS
+	mov	[bx], si	; update pcaddr with new offset
 	test	si, si		; did we overflow the segment?
 	jnz	.1		; if yes, apply overflow to pcaddr
 	add	byte [bx+3], 0x10
@@ -585,24 +587,136 @@ h000111:and	cx, 7		; CX = #imm3
 
 	; 10100BBBCCCCCCCC ADD Rd, PC, #imm8 (ADR Rd, label)
 	; 10101BBBCCCCCCCC ADD Rd, SP, #imm8
-h1010:	test	ah, 0x8		; is this ADD Rd, SP, #imm8?
+h1010:	mov	di, [oprB]	; di = &Rd
+	test	ah, 0x8		; is this ADD Rd, SP, #imm8?
 	jnz	.sp		; if not, this is ADD Rd, PC, #imm8
-	call	pclin		; set up R15 to the right program counter
-	strlo	cx, 15		; load PC into BX:CX
-	strhi	bx, 15
+	call	fixRd		; fix up flags to Rd if needed
+	call	pclin		; DX:AX = R15
 	jmp	.fi
-.sp:	strlo	cx, 13		; load SP into BX:CX
-	strhi	bx, 13
-.fi:	mov	ah, 0		; AX = #imm8 >> 2
-	shl	ax, 1
-	shl	ax, 1		; AX = #imm8
-	add	cx, ax		; BX:CX == BX:CX + AX (= PC/SP + #imm8)
-	adc	bx, 0
-	mov	di, [oprB]	; di = &Rd
-	call	fixRd		; fix up Rd if needed
-	mov	[di], cx	; Rd = BX:CX
-	mov	[di+hi], bx
+.sp:	call	fixRd		; fix up flags to Rd if needed
+	strlo	ax, 13		; load SP into DX:AX
+	strhi	dx, 13
+.fi:	mov	cx, [oprC]	; CX = #imm8 >> 2
+	shl	cx, 1
+	shl	cx, 1		; CX = #imm8
+	add	ax, cx		; DX:AX == DX:AX + CX (= PC/SP + #imm8)
+	adc	dx, 0
+	stosw			; Rd = DX:AX
+	mov	[di+hi-2], dx
 	ret
+
+	; 1101AAAABBBBBBBB B<c> <label>
+	; 11011110BBBBBBBB UDF #imm8
+	; 11011111BBBBBBBB SVC #imm8
+h1101:	mov	bl, ah		; BL = 1101AAAA
+	xchg	bx, ax		; BX = insn, AL = 1101AAAA
+	shl	al, 1		; AL = 101AAAA0
+	shl	al, 1		; AL = 01AAAA00
+	cbw			; AX = 01AAAA00
+	add	ax, h1101xxxx-0x40
+	xchg	di, ax		; DI = h1101xxxx[AAAA]
+	call	fixflags	; set up true flags in flags
+	push	word [flags]
+	popf			; set up SF, OF, ZF, and CF according to flags
+	jmp	di
+
+	; conditional branch jump table.  Each entry is four bytes long and
+	; corresponds to one conditional code.  If the jump is not taken, the
+	; table entry returns, otherwise it branches to .taken.  UDF and SVC
+	; receive special treatment.
+	align	4, int3
+h1101xxxx:
+	; 0000 BEQ
+	je	.taken
+	ret
+	int3
+
+	; 0001 BNE
+	jne	.taken
+	ret
+	int3
+
+	; 0010 BCS, BHS
+	jc	.taken
+	ret
+	int3
+
+	; 0011 BCC, BLO
+	jnc	.taken
+	ret
+	int3
+
+	; 0100 BMI
+	js	.taken
+	ret
+	int3
+
+	; 0101 BPL
+	jns	.taken
+	ret
+	int3
+
+	; 0110 BVS
+	jo	.taken
+	ret
+	int3
+
+	; 0111 BVC
+	jno	.taken
+	ret
+	int3
+
+	; 1000 BHI
+	cmc
+	ja	.taken
+	ret
+
+	; 1001 BLS
+	cmc
+	jbe	.taken
+	ret
+
+	; 1010	BGE
+	jge	.taken
+	ret
+	int3
+
+	; 1011	BLT
+	jl	.taken
+	ret
+	int3
+
+	; 1100	BGT
+	jg	.taken
+	ret
+	int3
+
+	; 1101	BLE
+	jle	.taken
+	ret
+	int3
+
+	; 1110	UDF (BAL)
+	jmp	.udf
+
+	; 1111	SVC (BNV)
+	align	4, int3
+	jmp	.svc
+
+.taken:	mov	si, bx		; remember insn as pclin trashes BX
+	call	pclin		; DX:AX = R15
+	xchg	ax, si		; AL = #imm8, DX:SI = R15
+	cbw			; AX = #imm8
+	shl	ax, 1		; AX = #imm8:0
+	add	ax, si		; DX:AX = R15 + #imm8
+	adc	dx, 0
+	ldrlo	15, ax		; R15 = DX:AX
+	ldrhi	15, dx
+	jmp	pcseg		; set up pcaddr according to R15
+
+	; TODO
+.udf:
+.svc:	int3
 
 	; instruction handlers that have not been implemented yet
 h001:
@@ -613,7 +727,6 @@ h1000:
 h1001:
 h1011:
 h1100:
-h1101:
 h1110:
 h1111:	int3
 
@@ -706,12 +819,13 @@ pcseg:	strlo	ax, 15		; load PC into DX:AX
 
 	; determine the linear address of the current instruction from pcaddr
 	; and load it into PC.  It is assumed that PC points into the right
-	; address space already.  Trashes AX, BX, CX, and DX.  Assumes DS=CS.
-	; Note that as this function is called after pcaddr has been incremented
-	; to point right past the current instruction, there is a certain
-	; asymmetry to pcseg which assumes that R15 points directly to the
-	; instruction to execute.  As usual on ARM, R15 is updated to point
-	; 4 bytes ahead of the current instruction, ie. 2 bytes ahead of pcaddr.
+	; address space already.  Trashes AX, BX, CX, and DX.  Returns the value
+	; of R15 in DX:AX.  Assumes DS=CS.  Note that as this function is called
+	; after pcaddr has been incremented to point right past the current
+	; instruction, there is a certain asymmetry to pcseg which assumes that
+	; R15 points directly to the instruction to execute.  As usual on ARM,
+	; R15 is updated to point 4 bytes ahead of the current instruction, ie.
+	; 2 bytes ahead of pcaddr.
 pclin:	mov	ax, [pcaddr]	; DX:AX = pcaddr
 	mov	dx, [pcaddr+2]
 	strhi	bh, 1+15	; load R15 high byte into BH
