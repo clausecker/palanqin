@@ -399,8 +399,9 @@ htXXXX:	dw	h000		; 000XX shift immediate
 
 	; jump table for instructions 000XXX
 	; we decode the MSB of the immediate because shifting by 16 or more
-	; places generally requires different code than shifting by less
-ht000:	dw	h000000		; LSL immediate (< 16)
+	; places requires different code than shifting by less
+ht000XXX:
+	dw	h000000		; LSL immediate (< 16)
 	dw	h000001		; LSL immediate (> 15)
 	dw	h000010		; LSR immediate (< 16)
 	dw	h000011		; LSR immediate (> 15)
@@ -412,10 +413,33 @@ ht000:	dw	h000000		; LSL immediate (< 16)
 	; jump table for instructions 000XX where imm8 == 0
 	; this requires special treatment as some shifts treat a 0
 	; immediate as 32 while others treat it as 0.
-ht000z:	dw	h00000z		; MOVS Rd, Rm
+ht000XXz:
+	dw	h00000z		; MOVS Rd, Rm
 	dw	h00001z		; LSRS Rd, Rm, #32
 	dw	h00010z		; ASRS Rd, Rm, #32
 	dw	h000110		; ADDS Rd, Rm, R0
+
+
+	; jump table for the miscellaneous instructions 1011XXXX
+	; instructions in parentheses are not available on Cortex-M0
+	; cores and generate an undefined instruction exception.
+ht1011XXXX:
+	dw	h10110000	; ADD/SUB SP, SP, #imm7
+	dw	h10110001	; (CBZ Rn, #imm5)
+	dw	h10110010	; SXTB/SXTH/UXTB/UXTH
+	dw	h10110011	; (CBZ Rn, #imm5)
+	dw	h10110100	; PUSH {...}
+	dw	h10110101	; PUSH {..., LR}
+	dw	h10110110	; CPS
+	dw	h10110111	; undefined
+	dw	h10111000	; undefined
+	dw	h10111001	; (CBNZ Rn, #imm5)
+	dw	h10111010	; REV/REV16/REVSH
+	dw	h10111011	; (CBNZ Rn, #imm5)
+	dw	h10111100	; POP {...}
+	dw	h10111101	; POP {..., LR}
+	dw	h10111110	; BKPT #imm8
+	dw	h10111111	; (IT), hints
 
 	section	.text
 
@@ -430,10 +454,10 @@ h000:	mov	bl, ah		; BL = 000XXAAA
 	mov	cx, [oprA]	; CL = imm5 (or Rm for 000110...)
 	test	cl, cl		; is imm8 == 0?
 	jz	.zero		; if yes, perform special handling
-	jmp	[ht000+bx]	; call instruction specific handler
+	jmp	[ht000XXX+bx]	; call instruction specific handler
 
 .zero:	shr	bl, 1		; BL = 00000XX0
-	jmp	[ht000z+bx]	; call handler for imm8 = 0
+	jmp	[ht000XXz+bx]	; call handler for imm8 = 0
 
 	; 0000000000BBBCCC MOVS Rd, Rm
 	; CV is preserved, NZ are set according to Rm
@@ -605,6 +629,42 @@ h1010:	mov	di, [oprB]	; di = &Rd
 	mov	[di+hi-2], dx
 	ret
 
+	; miscellaneous instructions
+	; 4 more instruction bits decode the subinstruction
+h1011:	mov	bl, ah		; BL = 1011XXXX
+	shl	bl, 1		; BL = 011XXXX0
+	and	bx, 0x1e	; BX = 000XXXX0
+	jmp	[ht1011XXXX+bx]
+
+h10110000:
+h10110001:
+h10110010:
+h10110011:
+h10110100:
+h10110101:
+h10110110:
+h10110111:
+h10111000:
+h10111001:
+h10111010:
+h10111011:
+h10111100:
+h10111101:
+h10111110:	int3
+
+	; hint instructions
+	; 10111111XXXXYYYY (IT) where YYYY != 0000
+	; 1011111100000000 NOP
+	; 1011111100010000 YIELD
+	; 1011111100100000 WFE
+	; 1011111100110000 WFI
+	; 1011111101000000 SEV
+h10111111:
+	test	al, 0xf		; is this IT?
+	je	.it		; if yes, generate UNDEFINED
+	ret			; else, treat as NOP
+.it:	jmp	undefined	; generate an undefined instruction exception
+
 	; 1101AAAABBBBBBBB B<c> <label>
 	; 11011110BBBBBBBB UDF #imm8
 	; 11011111BBBBBBBB SVC #imm8
@@ -697,7 +757,7 @@ h1101xxxx:
 	int3
 
 	; 1110	UDF (BAL)
-	jmp	.udf
+	jmp	undefined
 
 	; 1111	SVC (BNV)
 	align	4, int3
@@ -714,9 +774,7 @@ h1101xxxx:
 	ldrhi	15, dx
 	jmp	pcseg		; set up pcaddr according to R15
 
-	; TODO
-.udf:
-.svc:	int3
+.svc:	int3			; todo
 
 	; instruction handlers that have not been implemented yet
 h001:
@@ -725,7 +783,6 @@ h0101:
 h011:
 h1000:
 h1001:
-h1011:
 h1100:
 h1110:
 h1111:	int3
@@ -844,6 +901,14 @@ pclin:	mov	ax, [pcaddr]	; DX:AX = pcaddr
 
 .wild:	int3			; TODO: generate an exception or something
 	jmp	.wild		; endless loop
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Exceptions, Events, and Interrupts                                         ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	; generate an undefined instruction exception
+undefined:
+	int3			; TODO
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; IO Routines                                                                ;;

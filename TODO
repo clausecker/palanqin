@@ -9,5 +9,11 @@ Currently implemented instructions:
     LSLS Rd, Rm, #imm5
     LSRS Rd, Rm, #imm5
     MOVS Rd, Rm
+    NOP
+    SEV
     SUBS Rd, Rn, #imm3
     SUBS Rd, Rn, Rm
+    UDF #imm8
+    WFE
+    WFI
+    YIELD
