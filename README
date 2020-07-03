@@ -25,13 +25,11 @@ of the program.
 
 # Escape hatches:
 
-TODO: Perhaps change this to some magic addresses in the region
-0xf0000000 -- 0xffffffff?
+The otherwise undefined instructions 0xb700 -- 0xb7ff are used to
+interact with the host system.  Escape hatch opcodes that aren't
+currently implemented behave like an undefined instruction.
 
-The SVC instruction with operands in the range #0x80 to #0x8f is
-reserved to perform special functions.
-
-    BKPT #0xf0
+    ????
 
 Perform a host software interrupt.  On entry, the 8086 registers are
 set up as described below.  On exit from the interrupt handler, the
@@ -59,19 +57,23 @@ for SS:SP is ignored.  The arithmetic flags (NZCV) are translated into
 x86 flags on entry to the software interrupt.  On exit, the flags are
 translated back into NZCV and also saved into R12.
 
-    BKPT #0xf1
+    ????
 
 Perform a far call into native code.  The behaviour is the same as for
 BKPT #0xf0, except R9 is taken to contain a far pointer (segment/offset)
 to the function you want to call.  The function is called on the host
 stack.
 
-    BKPT #0xf2 (like BKPT #0xf0)
-    BKPT #0xf3 (like BKPT #0xf1)
+    ????
 
 Perform software interrupts/far calls on the emulated stack.  The
 register usage is as above, except that SS:SP is taken from R10 and R4.
 
-    BKPT #0xff
+    0xb700
 
-Terminate the emulation and return to the host.
+Terminate the emulation and return to the host.  The contents of R0 are
+used to form an error level.
+
+    0xb701
+
+Print the current register contents to the terminal.

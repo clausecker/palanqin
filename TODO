@@ -17,3 +17,8 @@ Currently implemented instructions:
     WFE
     WFI
     YIELD
+
+Currently implemented escape hatches:
+
+    0xb700 terminate emulation
+    0xb701 dump registers

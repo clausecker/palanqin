@@ -431,7 +431,7 @@ ht1011XXXX:
 	dw	h10110100	; PUSH {...}
 	dw	h10110101	; PUSH {..., LR}
 	dw	h10110110	; CPS
-	dw	h10110111	; undefined
+	dw	h10110111	; scape hatch
 	dw	h10111000	; undefined
 	dw	h10111001	; (CBNZ Rn, #imm5)
 	dw	h10111010	; REV/REV16/REVSH
@@ -440,6 +440,11 @@ ht1011XXXX:
 	dw	h10111101	; POP {..., LR}
 	dw	h10111110	; BKPT #imm8
 	dw	h10111111	; (IT), hints
+
+	; jump table for escape hatch instructions
+htB7XX:	dw	hB700		; terminate emulation
+	dw	hB701		; dump registers
+B7max	equ	($-htB7XX-2)/2	; highest escape hatch number used
 
 	section	.text
 
@@ -643,7 +648,6 @@ h10110011:
 h10110100:
 h10110101:
 h10110110:
-h10110111:
 h10111000:
 h10111001:
 h10111010:
@@ -651,6 +655,17 @@ h10111011:
 h10111100:
 h10111101:
 h10111110:	int3
+
+	; 10110111 escape hatch
+	; this instruction allows the program to interact with the host
+h10110111:
+	cmp	al, B7max	; is this a valid escape hatch opcode?
+	ja	.ud		; if not, treat as undefined instruction
+	mov	bl, al		; BL = operation code
+	xor	bh, bh		; BX = operation code
+	shl	bl, 1		; form table index
+	jmp	[htB7XX+bx]
+.ud:	jmp	undefined	; treat as undefined instruction
 
 	; hint instructions
 	; 10111111XXXXYYYY (IT) where YYYY != 0000
@@ -911,10 +926,89 @@ undefined:
 	int3			; TODO
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Escape Hatches                                                             ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	; b700 terminate emulation
+hB700:	strlo	al, 0		; AL = R0(lo) (error level)
+	mov	ah, 0x4c
+	int	0x21		; 0x4c: TERMINATE PROGRAM
+
+	; register dump template
+	section	.data
+dump	db	"R0  "
+.r0	db          "XXXXXXXX  " ; start of the field for R0 within the dump
+.field	equ	$-dump		; length of one register field
+	db	              "R1  XXXXXXXX  R2  XXXXXXXX  R3  XXXXXXXX", 13, 10
+	db	"R4  XXXXXXXX  R5  XXXXXXXX  R6  XXXXXXXX  R7  XXXXXXXX", 13, 10
+	db	"R8  XXXXXXXX  R9  XXXXXXXX  R10 XXXXXXXX  R11 XXXXXXXX", 13, 10
+	db	"R12 XXXXXXXX  SP  XXXXXXXX  LR  XXXXXXXX  PC  XXXXXXXX", 13, 10
+.endr	db	"NZCV  "
+.nzcv	db	"----", 13, 10, 0
+
+
+	; b701 dump registers
+	section	.text
+hB701:	call	fixflags	; set up flags
+	call	pclin		; set up R15
+	mov	di, dump.r0	; load R0 value field
+	mov	si, reglo	; for shorter instruction encodings
+.regs:	mov	ax, [si+hi]	; AX = reg(hi)
+	call	tohex		; convert high half to hex
+	lodsw			; AX = reg(lo)
+	call	tohex		; convert low half to hex
+	add	di, dump.field - 8 ; advance to next field
+	cmp	di, dump.endr	; finished dumping registers?
+	jb	.regs
+	mov	di, dump.nzcv	; advance SI to NZCV field
+	mov	ax, '--'	; clear all flags in the template
+	stosw
+	stosw
+	push	word [flags]	; set up flags according to emulator state
+	popf
+	jns	.nn		; is SF (N) set in flags?
+	mov	byte [di-4], 'N'
+.nn:	jnz	.nz		; is ZF (Z) set in flags?
+	mov	byte [di-3], 'Z'
+.nz:	jnc	.nc		; is CF (C) set in flags?
+	mov	byte [di-2], 'C'
+.nc:	jno	.nv		; is OF (V) set in flags?
+	mov	byte [di-1], 'V'
+.nv:	mov	si, dump	; load register dump template into DS:SI
+	jmp	puts		; dump registers and return
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; IO Routines                                                                ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+	; hexadecimal digits
+	section	.data
+hextab	db	"0123456789ABCDEF"
+
+	; convert number in AX to hexadecimal and write to DS:DI
+	; trashes AX, BX, CX, and DX.  Advances DI by 4 bytes.
 	section	.text
+tohex:	mov	bx, hextab	; base address for xlat
+	mov	cl, 4		; for shifting
+	mov	dx, ax		; make a copy for later use
+	rol	ax, cl		; shift digit X000 into place
+	and	al, 0xf		; isolate digit
+	xlat			; translate to hex
+	stosb			; deposit into string
+	mov	al, dh		; load digit 0X00
+	and	al, 0xf		; isolate digit
+	xlat			; translate to hex
+	stosb			; deposit into string
+	mov	al, dl		; load digit 00X0
+	shr	al, cl		; shift into place
+	and	al, 0xf		; isolate digit
+	xlat			; translate to hex
+	stosb			; deposit into string
+	xchg	ax, dx		; load digit 000X
+	and	al, 0xf		; isolate digit
+	xlat			; translate to hex
+	stosb			; deposit into string
+	ret
 
 	; print string in ds:si to stdout
 puts:	lodsb
