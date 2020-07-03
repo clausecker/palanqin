@@ -1,23 +1,26 @@
 Currently implemented instructions:
 
-    ADD  Rd, SP, #imm8
-    ADD  Rd, PC, #imm8
-    ADDS Rd, Rn, #imm3
-    ADDS Rd, Rn, Rm
-    ASRS Rd, Rm, #imm5
-    B<c> label
-    LSLS Rd, Rm, #imm5
-    LSRS Rd, Rm, #imm5
-    MOVS Rd, Rm
+    ADD   Rd, SP, #imm8
+    ADD   Rd, PC, #imm8
+    ADDS  Rd, Rn, #imm3
+    ADDS  Rd, Rn, Rm
+    ASRS  Rd, Rm, #imm5
+    B<c>  label
+    LSLS  Rd, Rm, #imm5
+    LSRS  Rd, Rm, #imm5
+    MOVS  Rd, Rm
     NOP
+    REV   Rd, Rm
+    REV16 Rd, Rm
+    REVSH Rd, Rm
     SEV
-    SUBS Rd, Rn, #imm3
-    SUBS Rd, Rn, Rm
-    SXTB Rd, Rm
-    SXTH Rd, Rm
-    UDF #imm8
-    UXTB Rd, Rm
-    UXTH Rd, Rm
+    SUBS  Rd, Rn, #imm3
+    SUBS  Rd, Rn, Rm
+    SXTB  Rd, Rm
+    SXTH  Rd, Rm
+    UDF   #imm8
+    UXTB  Rd, Rm
+    UXTH  Rd, Rm
     WFE
     WFI
     YIELD

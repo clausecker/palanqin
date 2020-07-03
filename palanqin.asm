@@ -431,7 +431,7 @@ ht1011XXXX:
 	dw	h10110100	; PUSH {...}
 	dw	h10110101	; PUSH {..., LR}
 	dw	h10110110	; CPS
-	dw	h10110111	; scape hatch
+	dw	h10110111	; escape hatch
 	dw	h10111000	; undefined
 	dw	h10111001	; (CBNZ Rn, #imm5)
 	dw	h10111010	; REV/REV16/REVSH
@@ -446,6 +446,12 @@ htB2	dw	hB200		; SXTH Rd, Rm
 	dw	hB201		; SXTB Rd, Rm
 	dw	hB210		; UXTH Rd, Rm
 	dw	hB211		; UXTB Rd, Rm
+
+	; jump table for reverse bytes
+htBA	dw	hBA00		; REV Rd, Rm
+	dw	hBA01		; undefined
+	dw	hBA10		; REV16 Rd, Rm
+	dw	hBA11		; REVSH Rd, Rm
 
 	; jump table for escape hatch instructions
 htB7	dw	hB700		; terminate emulation
@@ -648,18 +654,16 @@ h1011:	mov	bl, ah		; BL = 1011XXXX
 	jmp	[ht1011XXXX+bx]
 
 h10110000:
-h10110001:
-h10110011:
 h10110100:
 h10110101:
 h10110110:
-h10111000:
-h10111001:
-h10111010:
-h10111011:
 h10111100:
 h10111101:
 h10111110:	int3
+
+	; 101100A1AAAAABBB (CBZ Rd, #imm5)
+h10110001 equ	undefined
+h10110011 equ	undefined
 
 	; 10110010XXAAABBB (un)signed extend byte/word
 h10110010:
@@ -718,6 +722,61 @@ h10110111:
 	shl	bl, 1		; form table index
 	jmp	[htB7+bx]
 .ud:	jmp	undefined	; treat as undefined instruction
+
+	; 10111000XXXXXXXX undefined
+h10111000 equ	undefined
+
+	; 101110A1AAAAABBB (CBNZ Rd, #imm5)
+h10111001 equ	undefined
+h10111011 equ	undefined
+
+	; 10111010XXAAABBB reverse bytes
+h10111010:
+	mov	dx, 0xe		; mask for extracting the instruction fields
+	mov	si, reglo
+	mov	di, ax
+	shl	di, 1		; form an offset into the register table
+	and	di, dx		; mask out operand C
+	add	di, si		; oprC = &reglo[C]
+
+	mov	bx, ax
+	shr	ax, 1
+	shr	ax, 1		; form an offset into the register table
+	and	ax, dx		; mask out operand B
+	add	si, ax		; oprB = &reglo[B]
+
+	mov	cl, 5
+	shr	bx, cl		; BX = 0000010111010XXA
+	and	bx, dx		; BX = 0000000000000XX0
+	call	fixRd		; set flags on Rd if needed
+	lodsw			; AX = Rm(lo), DI += 2
+	jmp	[htBA+bx]	; jump to instruction handler
+
+	; 1011101000AAABBB REV Rd, Rm
+hBA00:	xchg	ah, al		; reverse Rm(lo)
+	mov	dx, [si+hi-2]	; DX = Rm(hi)
+	xchg	dh, dl		; reverse Rm(hi)
+	mov	[di], dx	; Rd = REV(Rm)
+	mov	[di+hi], ax
+	ret
+
+	; 1011101001XXXXXX undefined
+hBA01	equ	undefined
+
+	; 1011101010AAABBB REV16 Rd, Rm
+hBA10:	xchg	ah, al		; reverse Rm(lo)
+	stosw			; Rd(lo) = REV(Rm(lo))
+	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	xchg	ah, al		; reverse Rm(hi)
+	mov	[di+hi-2], ax	; Rd(hi) = REV(Rm(hi))
+	ret
+
+	; 1011101011AAABBB REVSH Rd, Rm
+hBA11:	xchg	ah, al		; reverse Rm(lo)
+	cwd			; sign extend into DX:AX
+	stosw			; Rd = DX:AX
+	mov	[di+hi-2], dx
+	ret
 
 	; hint instructions
 	; 10111111XXXXYYYY (IT) where YYYY != 0000
