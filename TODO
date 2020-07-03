@@ -13,7 +13,11 @@ Currently implemented instructions:
     SEV
     SUBS Rd, Rn, #imm3
     SUBS Rd, Rn, Rm
+    SXTB Rd, Rm
+    SXTH Rd, Rm
     UDF #imm8
+    UXTB Rd, Rm
+    UXTH Rd, Rm
     WFE
     WFI
     YIELD

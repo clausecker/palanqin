@@ -441,10 +441,16 @@ ht1011XXXX:
 	dw	h10111110	; BKPT #imm8
 	dw	h10111111	; (IT), hints
 
+	; jump table for (un)signed byte/halfword extend
+htB2	dw	hB200		; SXTH Rd, Rm
+	dw	hB201		; SXTB Rd, Rm
+	dw	hB210		; UXTH Rd, Rm
+	dw	hB211		; UXTB Rd, Rm
+
 	; jump table for escape hatch instructions
-htB7XX:	dw	hB700		; terminate emulation
+htB7	dw	hB700		; terminate emulation
 	dw	hB701		; dump registers
-B7max	equ	($-htB7XX-2)/2	; highest escape hatch number used
+B7max	equ	($-htB7-2)/2	; highest escape hatch number used
 
 	section	.text
 
@@ -643,7 +649,6 @@ h1011:	mov	bl, ah		; BL = 1011XXXX
 
 h10110000:
 h10110001:
-h10110010:
 h10110011:
 h10110100:
 h10110101:
@@ -656,6 +661,53 @@ h10111100:
 h10111101:
 h10111110:	int3
 
+	; 10110010XXAAABBB (un)signed extend byte/word
+h10110010:
+	mov	dx, 0xe		; mask for extracting the instruction fields
+	mov	si, reglo
+	mov	di, ax
+	shl	di, 1		; form an offset into the register table
+	and	di, dx		; mask out operand C
+	add	di, si		; oprC = &reglo[C]
+
+	mov	bx, ax
+	shr	ax, 1
+	shr	ax, 1		; form an offset into the register table
+	and	ax, dx		; mask out operand B
+	add	si, ax		; oprB = &reglo[B]
+
+	mov	cl, 5
+	shr	bx, cl		; BX = 0000010110010XXA
+	and	bx, dx		; BX = 0000000000000XX0
+	call	fixRd		; set flags on Rd if needed
+	lodsw			; AX = Rm(lo), DI += 2
+	jmp	[htB2+bx]	; jump to instruction handler
+
+	; 1011001000AAABBB SXTH Rd, Rm
+hB200:	cwd			; DX:AX = SXTH(Rm(lo))
+	stosw			; Rd = DX:AX
+	mov	[di+hi-2], dx
+	ret
+
+	; 1011001001AAABBB SXTB Rd, Rm
+hB201:	cbw			; DX:AX = SXTB(Rm(lo))
+	cwd
+	stosw			; Rd = DX:AX
+	mov	[di+hi-2], dx
+	ret
+
+hB210:	; 1011001010AAABBB UXTH Rd, Rm
+	stosw			; Rd = UXTH(Rm(lo))
+	mov	word [di+hi-2], 0
+	ret
+
+	; 1011001011AAABBB UXTB Rd, Rm
+hB211:	stosb			; Rd = UXTB(Rm(lo))
+	xor	ax, ax
+	stosb
+	mov	[di+hi-2], ax
+	ret
+
 	; 10110111 escape hatch
 	; this instruction allows the program to interact with the host
 h10110111:
@@ -664,7 +716,7 @@ h10110111:
 	mov	bl, al		; BL = operation code
 	xor	bh, bh		; BX = operation code
 	shl	bl, 1		; form table index
-	jmp	[htB7XX+bx]
+	jmp	[htB7+bx]
 .ud:	jmp	undefined	; treat as undefined instruction
 
 	; hint instructions
