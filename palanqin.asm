@@ -781,10 +781,12 @@ h1101xxxx:
 .taken:	mov	si, bx		; remember insn as pclin trashes BX
 	call	pclin		; DX:AX = R15
 	xchg	ax, si		; AL = #imm8, DX:SI = R15
+	mov	cx, dx		; CX:SI = R15
 	cbw			; AX = #imm8
+	cwd			; DX:AX = #imm8
 	shl	ax, 1		; AX = #imm8:0
 	add	ax, si		; DX:AX = R15 + #imm8
-	adc	dx, 0
+	adc	dx, cx
 	ldrlo	15, ax		; R15 = DX:AX
 	ldrhi	15, dx
 	jmp	pcseg		; set up pcaddr according to R15
