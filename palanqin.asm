@@ -4,7 +4,8 @@
 	cpu	8086		; restrict nasm to 8086 instructions
 
 	section	.data
-ident	db	"Copyright (c) 2020 Robert Clausecker <fuz@fuz.su>", 10, 13, 0
+ident	db	"Copyright (c) 2020 Robert Clausecker <fuz@fuz.su>"
+crlf	db	13, 10, 0
 
 	section	.bss
 	align	2
@@ -1182,7 +1183,6 @@ errors	dw	.E00, .E01, .E02, .E03, .E04, .E05, .E06, .E07
 .E12	db	"no more files",0
 
 colsp	db	": ",0
-crlf	db	13,10,0
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Colophon                                                                   ;;
