@@ -1114,7 +1114,6 @@ tohex:	mov	bx, hextab	; base address for xlat
 	stosb			; deposit into string
 	mov	al, dl		; load digit 00X0
 	shr	al, cl		; shift into place
-	and	al, 0xf		; isolate digit
 	xlat			; translate to hex
 	stosb			; deposit into string
 	xchg	ax, dx		; load digit 000X
