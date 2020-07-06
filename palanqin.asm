@@ -39,6 +39,12 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 	mov	%1, [%2*2+reghi]
 %endmacro
 
+	; functionality not implemented
+%macro	todo	0
+	int3
+	ret
+%endmacro
+
 	; 8086 flags (those we find useful)
 CF	equ	0x0001
 ZF	equ	0x0040
@@ -660,7 +666,7 @@ h10110101:
 h10110110:
 h10111100:
 h10111101:
-h10111110:	int3
+h10111110:	todo
 
 	; 101100A1AAAAABBB (CBZ Rd, #imm5)
 h10110001 equ	undefined
@@ -903,7 +909,7 @@ h1101xxxx:
 	ldrhi	15, dx
 	jmp	pcseg		; set up pcaddr according to R15
 
-.svc:	int3			; todo
+.svc:	todo			; todo
 
 	; instruction handlers that have not been implemented yet
 h001:
@@ -914,7 +920,7 @@ h1000:
 h1001:
 h1100:
 h1110:
-h1111:	int3
+h1111:	todo
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Flag Manipulation                                                          ;;
@@ -1000,7 +1006,7 @@ pcseg:	strlo	ax, 15		; load PC into DX:AX
 	mov	[pcaddr+2], dx
 	ret
 
-.wild:	int3			; TODO: generate an exception or something
+.wild:	todo			; TODO: generate an exception or something
 	jmp	.wild		; endless loop
 
 	; determine the linear address of the current instruction from pcaddr
@@ -1028,7 +1034,7 @@ pclin:	mov	ax, [pcaddr]	; DX:AX = pcaddr
 	ldrhi	15, dx
 	ret
 
-.wild:	int3			; TODO: generate an exception or something
+.wild:	todo			; TODO: generate an exception or something
 	jmp	.wild		; endless loop
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1037,7 +1043,7 @@ pclin:	mov	ax, [pcaddr]	; DX:AX = pcaddr
 
 	; generate an undefined instruction exception
 undefined:
-	int3			; TODO
+	todo			; TODO
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Escape Hatches                                                             ;;
