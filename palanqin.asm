@@ -50,6 +50,7 @@ OF	equ	0x0800
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	section	.text
+	global	start
 
 	; relocate the stack
 start:	mov	sp, end+stack	; beginning of stack
@@ -988,6 +989,7 @@ linseg:	and	dx, 0xf
 pcseg:	strlo	ax, 15		; load PC into DX:AX
 	strhi	dx, 15
 	mov	ch, dh		; keep a copy of the top 4 bit of PC
+	and	al, ~1		; clear thumb bit if needed
 	call	linseg		; set up linear address in DX:AX
 	and	ch, 0xf0	; isolate address space nibble
 	jnz	.not0		; address space 0 (adjusted)?
