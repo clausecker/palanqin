@@ -937,12 +937,13 @@ fixflags:
 	lahf
 	mov	al, ah		; AL = R(lo) flags
 	cmp	[si+hi], dx	; set ZF according to R(hi)
+	lahf
 	or	al, ~ZF		; isolate ZF in AL
 	and	ah, al		; AH = SF, ZF according to R
 	mov	al, [flags]
-	and	ax, ~(ZF|SF)<<8|ZF|SF
-				; mask AL to just ZF and SF, AH to all but
-				; ZF and SF
+	and	ax, (ZF|SF)<<8|~(ZF|SF)
+				; mask AL to all but ZF and SF,
+				; AH to just ZF and SF
 	or	al, ah		; merge the two
 	mov	[flags], al	; write them back
 	mov	[zsreg], dx	; and mark the flags as being fixed
