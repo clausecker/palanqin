@@ -978,8 +978,7 @@ seglin:	mov	cl, 4
 linseg:	and	dx, 0xf
 	mov	dh, ah
 	mov	cl, 4
-	ror	dx, cl
-	mov	ds, dx		; ds = dx << 12 | ax >> 4 & 0x0ff0
+	ror	dx, cl		; dx = dx << 12 | ax >> 4 & 0x0ff0
 	xor	ah, ah		; ax = ax & 0x00ff
 	ret
 

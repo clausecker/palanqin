@@ -20,6 +20,7 @@ SECTIONS {
 
 	.bss : {
 		*(.bss);
+		. = ALIGN(16);
 	}
 
 	end = .;
