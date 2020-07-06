@@ -387,7 +387,7 @@ htXXXX:	dw	h000		; 000XX shift immediate
 	dw	h000		; 00011 add/subtract register/immediate
 	dw	h001		; 001XX add/subtract/compare/move immediate
 	dw	h001
-	dw	h0100		; 010100XXXX data-processing register
+	dw	h0100		; 010000XXXX data-processing register
 				; 010001XX special data processing
 				; 01001 LDR  (literal pool)
 	dw	h0101		; 0101 load/store register offset
@@ -420,12 +420,18 @@ ht000XXX:
 	; jump table for instructions 000XX where imm8 == 0
 	; this requires special treatment as some shifts treat a 0
 	; immediate as 32 while others treat it as 0.
+	; This table is interleaved with the jump table for
+	; add/subtract/compare/move immediate to save a shift.
 ht000XXz:
 	dw	h00000z		; MOVS Rd, Rm
+ht001XX:
+	dw	h00100		; MOVS Rd, #imm8
 	dw	h00001z		; LSRS Rd, Rm, #32
+	dw	h00101		; CMP  Rd, #imm8
 	dw	h00010z		; ASRS Rd, Rm, #32
+	dw	h00110		; ADDS Rd, #imm8
 	dw	h000110		; ADDS Rd, Rm, R0
-
+	dw	h00111		; SUBS Rd, #imm8
 
 	; jump table for the miscellaneous instructions 1011XXXX
 	; instructions in parentheses are not available on Cortex-M0
@@ -480,8 +486,7 @@ h000:	mov	bl, ah		; BL = 000XXAAA
 	jz	.zero		; if yes, perform special handling
 	jmp	[ht000XXX+bx]	; call instruction specific handler
 
-.zero:	shr	bl, 1		; BL = 00000XX0
-	jmp	[ht000XXz+bx]	; call handler for imm8 = 0
+.zero:	jmp	[ht000XXz+bx]	; call handler for imm8 = 0
 
 	; 0000000000BBBCCC MOVS Rd, Rm
 	; CV is preserved, NZ are set according to Rm
@@ -630,6 +635,46 @@ h000111:and	cx, 7		; CX = #imm3
 .fi:	mov	[di], dx	; Rd = AX:DX
 	mov	[di+hi], ax
 	pushf			; remember all flags
+	pop	word [flags]
+	ret
+
+	; 001XXAAABBBBBBBB add/subtract/compare/move immediate
+h001:	mov	bl, ah		; BL = 001XXAAA
+	shr	bl, 1		; BL = 0001XXAA
+	and	bx, 0xc		; BL = 0000XX00
+	mov	di, [oprA]	; DI = &reglo[Rd]
+	mov	ah, 0		; AX = #imm8
+	mov	[zsreg], di	; set SF and ZF according to Rd
+	jmp	[ht001XX+bx]	; call instruction specific handler
+
+	; 00100AAABBBBBBBB MOVS Rd, #imm8
+h00100:	stosw			; Rd = #imm8
+	mov	word [di+hi-2], 0
+	ret
+
+	; 00101AAABBBBBBBB CMP Rn, #imm8
+h00101:	xchg	cx, ax		; move #imm8 out of the way
+	lodsw			; DX:AX = Rd
+	mov	dx, [di+hi-2]
+	sub	ax, cx		; DX:AX -= #imm8
+	sbb	dx, 0
+	cmc			; adjust CF to ARM conventions
+	pushf			; and remember flags
+	pop	word [flags]
+	ret
+
+	; 00110AAABBBBBBBB ADDS Rd, #imm8
+h00110:	add	[di], ax	; Rd += AX
+	add	word [di+hi], 0
+	pushf			; remember flags
+	pop	word [flags]
+	ret
+
+	; 00111AAABBBBBBBB SUBS Rd, #imm8
+h00111:	sub	[di], ax	; Rd -= AX
+	sbb	word [di+hi], 0
+	cmc			; adjust CF to ARM conventions
+	pushf			; and remember flags
 	pop	word [flags]
 	ret
 
@@ -912,7 +957,6 @@ h1101xxxx:
 .svc:	todo			; todo
 
 	; instruction handlers that have not been implemented yet
-h001:
 h0100:
 h0101:
 h011:
