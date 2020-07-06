@@ -2,14 +2,14 @@
 ; Copyright (c) 2020 Robert Clausecker <fuz@fuz.su>
 
 	cpu	8086		; restrict nasm to 8086 instructions
+	bits	16
+
+	; symbols provided by the linker script
+	extern	end, edata, etext, bsswords
 
 	section	.data
 ident	db	"Copyright (c) 2020 Robert Clausecker <fuz@fuz.su>"
 crlf	db	13, 10, 0
-
-	section	.bss
-	align	2
-edata	equ	$		; must be the first thing in .bss
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Parameters                                                                 ;;
@@ -50,7 +50,6 @@ OF	equ	0x0800
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	section	.text
-	org	0x100
 
 	; relocate the stack
 start:	mov	sp, end+stack	; beginning of stack
@@ -62,7 +61,7 @@ start:	mov	sp, end+stack	; beginning of stack
 	; initialise .bss
 	xor	ax, ax
 	mov	di, edata
-	mov	cx, (end-edata)/2 ; .bss section length in words
+	mov	cx, bsswords	; .bss section length in words
 	rep	stosw		; clear .bss
 
 	; configure emulator base address
@@ -1183,11 +1182,3 @@ errors	dw	.E00, .E01, .E02, .E03, .E04, .E05, .E06, .E07
 .E12	db	"no more files",0
 
 colsp	db	": ",0
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Colophon                                                                   ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-	section	.bss
-	alignb	16
-end	equ	$		; end of program (on paragraph boundary)

@@ -1,2 +1,4 @@
 *.com
 *.lst
+*.o
+*.elf
