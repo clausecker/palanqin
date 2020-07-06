@@ -642,6 +642,7 @@ h000111:and	cx, 7		; CX = #imm3
 h001:	mov	bl, ah		; BL = 001XXAAA
 	shr	bl, 1		; BL = 0001XXAA
 	and	bx, 0xc		; BL = 0000XX00
+	xor	si, si		; SI = 0
 	mov	di, [oprA]	; DI = &reglo[Rd]
 	mov	ah, 0		; AX = #imm8
 	mov	[zsreg], di	; set SF and ZF according to Rd
@@ -649,15 +650,13 @@ h001:	mov	bl, ah		; BL = 001XXAAA
 
 	; 00100AAABBBBBBBB MOVS Rd, #imm8
 h00100:	stosw			; Rd = #imm8
-	mov	word [di+hi-2], 0
+	mov	[di+hi-2], si
 	ret
 
 	; 00101AAABBBBBBBB CMP Rn, #imm8
-h00101:	xchg	cx, ax		; move #imm8 out of the way
-	lodsw			; DX:AX = Rd
-	mov	dx, [di+hi-2]
-	sub	ax, cx		; DX:AX -= #imm8
-	sbb	dx, 0
+h00101:	mov	dx, [di+hi]
+	cmp	[di], ax	; Rd(lo) - #imm8
+	sbb	dx, si		; Rd - #imm8
 	cmc			; adjust CF to ARM conventions
 	pushf			; and remember flags
 	pop	word [flags]
@@ -665,14 +664,14 @@ h00101:	xchg	cx, ax		; move #imm8 out of the way
 
 	; 00110AAABBBBBBBB ADDS Rd, #imm8
 h00110:	add	[di], ax	; Rd += AX
-	add	word [di+hi], 0
+	add	[di+hi], si
 	pushf			; remember flags
 	pop	word [flags]
 	ret
 
 	; 00111AAABBBBBBBB SUBS Rd, #imm8
 h00111:	sub	[di], ax	; Rd -= AX
-	sbb	word [di+hi], 0
+	sbb	[di+hi], si
 	cmc			; adjust CF to ARM conventions
 	pushf			; and remember flags
 	pop	word [flags]
