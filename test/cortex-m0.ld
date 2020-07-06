@@ -4,6 +4,8 @@ SECTIONS {
 	. = 0x0;
 
 	.text : {
+		LONG(0x1000); /* initial stack pointer */
+		LONG(_start); /* entry point */
 		*(.text.startup);
 		*(.text);
 	}
@@ -22,5 +24,6 @@ SECTIONS {
 		*(.bss);
 	}
 
+	. = ALIGN(4);
 	end = .;
 }
