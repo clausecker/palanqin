@@ -2,6 +2,7 @@ Currently implemented instructions:
 
     ADD   Rd, SP, #imm8
     ADD   Rd, PC, #imm8
+    ADD   SP, SP, #imm7
     ADDS  Rd, Rn, #imm3
     ADDS  Rd, #imm8
     ADDS  Rd, Rn, Rm
@@ -17,6 +18,7 @@ Currently implemented instructions:
     REV16 Rd, Rm
     REVSH Rd, Rm
     SEV
+    SUB   SP, SP, #imm7
     SUBS  Rd, Rn, #imm3
     SUBS  Rd, #imm8
     SUBS  Rd, Rn, Rm

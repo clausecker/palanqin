@@ -704,7 +704,22 @@ h1011:	mov	bl, ah		; BL = 1011XXXX
 	and	bx, 0x1e	; BX = 000XXXX0
 	jmp	[ht1011XXXX+bx]
 
+	; 101100000AAAAAAA ADD SP, SP, #imm7
+	; 101100001AAAAAAA SUB SP, SP, #imm7
 h10110000:
+	mov	di, reglo+2*13	; DI = &SP(lo) (shorter code)
+	xor	ah, ah		; AX = 00000000XAAAAAAA
+	shl	al, 1		; AX = 00000000AAAAAAA0, CF = ADD/SUB
+	jc	.sub
+	shl	ax, 1		; AX = #imm7 (in words)
+	add	[di], ax	; R13 += #imm7
+	adc	word [di+hi], 0
+	ret
+.sub:	shl	ax, 1		; AX = #imm7 (in words)
+	sub	[di], ax	; R13 += #imm7
+	sbb	word [di+hi], 0
+	ret
+
 h10110100:
 h10110101:
 h10110110:
@@ -768,7 +783,7 @@ hB211:	stosb			; Rd = UXTB(Rm(lo))
 h10110111:
 	cmp	al, B7max	; is this a valid escape hatch opcode?
 	ja	.ud		; if not, treat as undefined instruction
-	mov	bl, al		; BL = operation code
+	xchg	ax, bx		; BL = operation code
 	xor	bh, bh		; BX = operation code
 	shl	bl, 1		; form table index
 	jmp	[htB7+bx]
