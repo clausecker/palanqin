@@ -708,15 +708,17 @@ h00111:	sub	[di], ax	; Rd -= AX
 	; 01001AAABBBBBBBB LDR Rd, [PC, #imm8]
 h0100:	test	ah, 0x8		; is this LDR Rd, [PC, #imm8]?
 	jnz	.ldr
-	mov	si, [oprB]	; SI = &Rm
 	mov	di, [oprC]	; DI = &Rdn
 	mov	[zsreg], di	; set flags according to Rdn
 	test	ah, 0x4		; else, is this special data processing?
 	jnz	.sdp		; otherwise, it's data-processing register
+	mov	si, [oprB]	; SI = &Rm
 	mov	bx, [oprA]	; BX = 0000AAAA
 	shl	bx, 1		; BX = 000AAAA0
 	jmp	[ht010000XXXX+bx]
-.sdp:	mov	bl, ah		; BL = 010001AA
+.sdp:	call	fixRd		; fix flags if needed
+	mov	si, [oprB]	; SI = &Rm
+	mov	bl, ah		; BL = 010001AA
 	and	bx, 0x3		; BX = 000000AA
 	shl	bx, 1		; BX = 00000AA0
 	jmp	[ht010001XX+bx]
@@ -812,6 +814,8 @@ h0100001001:
 	ret
 
 	; 0100001010BBBCCC CMP Rn, Rm
+	; 01000101CBBBBCCC CMP Rn, Rm
+h01000101:
 h0100001010:
 	lodsw			; AX = Rm(lo)
 	mov	dx, [di+hi]	; DX = Rn(hi)
@@ -881,9 +885,23 @@ h0100001111:
 	mov	[di+hi-2], ax	; Rd(hI) = ~Rm(hi)
 	ret
 
+	; ADD Rd, Rm
 h01000100:
-h01000101:
+	lodsw			; AX = Rm(lo)
+	add	[di], ax	; Rd(lo) += Rm(lo)
+	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	adc	[di+hi], ax	; Rd(hi) += Rm(hi) + C
+	ret
+
+	; MOV Rd, Rm
 h01000110:
+	lodsw			; Rd = Rm
+	stosw
+	mov	ax, [si+hi-2]
+	mov	[di+hi-2], ax
+	ret
+
+	; BX Rm
 h01000111:
 	todo
 

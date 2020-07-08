@@ -1,9 +1,10 @@
 Currently implemented instructions:
 
+    ADCS  Rd, Rm
     ADD   Rd, SP, #imm8
     ADD   Rd, PC, #imm8
     ADD   SP, SP, #imm7
-    ADCS  Rd, Rm
+    ADD   Rd, Rm
     ADDS  Rd, Rn, #imm3
     ADDS  Rd, #imm8
     ADDS  Rd, Rn, Rm
@@ -17,6 +18,7 @@ Currently implemented instructions:
     EORS  Rn, Rm
     LSLS  Rd, Rm, #imm5
     LSRS  Rd, Rm, #imm5
+    MOV   Rd, Rm
     MOVS  Rd, #imm8
     MOVS  Rd, Rm
     MULS  Rd, Rm
