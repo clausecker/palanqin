@@ -433,6 +433,32 @@ ht001XX:
 	dw	h000110		; ADDS Rd, Rm, R0
 	dw	h00111		; SUBS Rd, #imm8
 
+	; jump table for data-processing register instructions
+ht010000XXXX:
+	dw	h0100000000	; ANDS Rdn, Rm
+	dw	h0100000001	; EORS Rdn, Rm
+	dw	h0100000010	; LSLS Rdn, Rm
+	dw	h0100000011	; LSRS Rdn, Rm
+	dw	h0100000100	; ASRS Rdn, Rm
+	dw	h0100000101	; ADCS Rdn, Rm
+	dw	h0100000110	; SBCS Rdn, Rm
+	dw	h0100000111	; RORS Rdn, Rm
+	dw	h0100001000	; TST  Rn, Rm
+	dw	h0100001001	; RSBS Rdn, Rm, #0
+	dw	h0100001010	; CMP  Rn, Rm
+	dw	h0100001011	; CMN  Rn, Rm
+	dw	h0100001100	; ORRS Rdn, Rm
+	dw	h0100001101	; MULS Rdn, Rm
+	dw	h0100001110	; BICS Rdn, Rm
+	dw	h0100001111	; MVN  Rdn, Rm
+
+	; jump table for special data-processing instructions
+ht010001XX:
+	dw	h01000100	; ADD Rdn, Rm
+	dw	h01000101	; CMP Rd, Rm
+	dw	h01000110	; MOV Rd, Rm
+	dw	h01000111	; BX Rm, BLX Rm
+
 	; jump table for the miscellaneous instructions 1011XXXX
 	; instructions in parentheses are not available on Cortex-M0
 	; cores and generate an undefined instruction exception.
@@ -676,6 +702,47 @@ h00111:	sub	[di], ax	; Rd -= AX
 	pushf			; and remember flags
 	pop	word [flags]
 	ret
+
+	; 010000AAAABBBCCC data-processing register
+	; 010001AACBBBBCCC special data processing
+	; 01001AAABBBBBBBB LDR Rd, [PC, #imm8]
+h0100:	test	ah, 0x8		; is this LDR Rd, [PC, #imm8]?
+	jnz	.ldr
+	mov	si, [oprB]	; SI = &Rm
+	mov	di, [oprC]	; DI = &Rdn
+	test	ah, 0x4		; else, is this special data processing?
+	jnz	.sdp		; otherwise, it's data-processing register
+	mov	bx, [oprA]	; BX = 0000AAAA
+	shl	bx, 1		; BX = 000AAAA0
+	jmp	[ht010000XXXX+bx]
+.sdp:	mov	bl, ah		; BL = 010001AA
+	and	bx, 0x3		; BX = 000000AA
+	shl	bx, 1		; BX = 00000AA0
+	jmp	[ht010001XX+bx]
+.ldr	todo			; TODO
+
+h0100000000:
+h0100000001:
+h0100000010:
+h0100000011:
+h0100000100:
+h0100000101:
+h0100000110:
+h0100000111:
+h0100001000:
+h0100001001:
+h0100001010:
+h0100001011:
+h0100001100:
+h0100001101:
+h0100001110:
+h0100001111:
+
+h01000100:
+h01000101:
+h01000110:
+h01000111:
+	todo
 
 	; 10100BBBCCCCCCCC ADD Rd, PC, #imm8 (ADR Rd, label)
 	; 10101BBBCCCCCCCC ADD Rd, SP, #imm8
@@ -971,7 +1038,6 @@ h1101xxxx:
 .svc:	todo			; todo
 
 	; instruction handlers that have not been implemented yet
-h0100:
 h0101:
 h011:
 h1000:
