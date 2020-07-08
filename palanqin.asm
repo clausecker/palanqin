@@ -450,7 +450,7 @@ ht010000XXXX:
 	dw	h0100001100	; ORRS Rdn, Rm
 	dw	h0100001101	; MULS Rdn, Rm
 	dw	h0100001110	; BICS Rdn, Rm
-	dw	h0100001111	; MVN  Rdn, Rm
+	dw	h0100001111	; MVNS Rdn, Rm
 
 	; jump table for special data-processing instructions
 ht010001XX:
@@ -710,6 +710,7 @@ h0100:	test	ah, 0x8		; is this LDR Rd, [PC, #imm8]?
 	jnz	.ldr
 	mov	si, [oprB]	; SI = &Rm
 	mov	di, [oprC]	; DI = &Rdn
+	mov	[zsreg], di	; set flags according to Rdn
 	test	ah, 0x4		; else, is this special data processing?
 	jnz	.sdp		; otherwise, it's data-processing register
 	mov	bx, [oprA]	; BX = 0000AAAA
@@ -719,24 +720,166 @@ h0100:	test	ah, 0x8		; is this LDR Rd, [PC, #imm8]?
 	and	bx, 0x3		; BX = 000000AA
 	shl	bx, 1		; BX = 00000AA0
 	jmp	[ht010001XX+bx]
-.ldr	todo			; TODO
+.ldr:	todo			; TODO
 
+	; 0100000000BBBCCC ANDS Rdn, Rm
 h0100000000:
+	lodsw			; AX = Rm(lo)
+	and	[di], ax	; Rdn(lo) &= Rm(lo)
+	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	and	[di+hi], ax	; Rdn(hi) &= Rm(hi)
+	ret
+
+	; 0100000001BBBCCC EORS Rdn, Rm
 h0100000001:
+	lodsw			; AX = Rm(lo)
+	xor	[di], ax	; Rdn(lo) ^= Rm(lo)
+	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	xor	[di+hi], ax	; Rdn(hi) ^= Rm(hi)
+	ret
+
+	; 0100000010BBBCCC LSLS Rdn, Rm
 h0100000010:
+	; 0100000011BBBCCC LSRS Rdn, Rm
 h0100000011:
+	; 0100000100BBBCCC ASRS Rdn, Rm
 h0100000100:
+	todo
+
+	; 0100000101BBBCCC ADCS Rdn, Rm
 h0100000101:
+	mov	bx, flags	; shorter code
+	mov	ah, [bx]	; restore CF from flags
+	sahf
+	lodsw			; AX = Rm(lo)
+	adc	[di], ax	; Rdn(lo) += Rm(lo) + CF
+	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	adc	[di+hi], ax	; Rdn(hi) += Rm(hi) + CF
+	pushf			; remember CF and OF in flags
+	pop	word [bx]
+	ret
+
+	; 0100000110BBBCCC SBCS Rdn, Rm
 h0100000110:
+	mov	bx, flags	; shorter code
+	mov	ah, [bx]	; restore CF from flags
+	sahf
+	cmc			; adapt CF from ARM conventions
+	lodsw
+	sbb	[di], ax	; Rdn(lo) -= Rm(lo) - 1 + CF
+	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	sbb	[di+hi], ax	; Rdn(hi) += Rm(hi) + CF
+	cmc			; adjust CF to ARM conventions
+	pushf			; remember CF and OF in flags
+	pop	word [bx]
+	ret
+
+	; 0100000111BBBCCC RORS Rdn, Rm
 h0100000111:
+	todo
+
+	; 0100001000BBBCCC TST Rn, Rm
 h0100001000:
+	lodsw			; DX:AX = Rm
+	mov	dx, [si+hi-2]
+	test	[di], ax	; set ZF according to Rm(lo) & Rn(lo)
+	lahf
+	mov	al, ah		; AL = Rm(lo) & Rn(lo) flags
+	test	[di+hi], dx	; set ZF and SF according Rm(hi) & Rn(hi)
+	lahf
+	or	al, ~ZF		; isolate ZF in AL
+	and	ah, al		; AH = SF, ZF according to Rm(lo) & Rn(lo)
+	mov	al, [flags]
+	and	ax, (ZF|SF)<<8|~(ZF|SF)
+				; mask AL to all but ZF and SF,
+				; AH to just ZF and SF
+	or	al, ah		; merge the two
+	mov	[flags], al	; write them back
+	mov	word [zsreg], 0	; mark flags as being fixed
+	ret
+
+	; 0100001001BBBCCC RSBS Rd, Rm, #0
+	; CF = Rn == 0
 h0100001001:
+	xor	ax, ax		; DX:AX = 0
+	xor	dx, dx
+	sub	ax, [si]	; DX:AX = -Rn
+	sbb	dx, [si+hi]
+	stosw			; Rd = DX:AX
+	mov	[di+hi-2], dx
+	lahf			; remember CF in flags
+	mov	[flags], ah
+	ret
+
+	; 0100001010BBBCCC CMP Rn, Rm
 h0100001010:
+	lodsw			; AX = Rm(lo)
+	mov	dx, [di+hi]	; DX = Rn(hi)
+	cmp	[di], ax	; set flags according to Rn(lo) - Rm(lo)
+	lahf			; and remember ZF in AH
+	sbb	dx, [si+hi-2]	; set CF, SF, and OF according to Rn - Rm
+	cmc			; adapt CF to ARM conventions
+.flags:	pushf			; load flags into DX
+	pop	dx
+	or	ah, ~ZF		; isolate ZF in AH
+	and	dl, ah		; set ZF in DX if Rn == Rm
+	mov	[flags], dx	; save flags in flags
+	mov	word [zsreg], 0	; mark flags as fixed
+	ret
+
+	; 0100001011BBBCCC CMN Rn, Rm
 h0100001011:
+	lodsw			; DX:AX = Rm
+	mov	dx, [si+hi-2]
+	add	ax, [di]	; set flags according to Rn(lo) + Rm(lo)
+	lahf			; and remember ZF in AH
+	adc	dx, [di+hi]	; set CF, SF, and OF according to Rn - Rm
+	jmp	h0100001010.flags ; rest is the same as with CMP Rn, Rm
+
+	; 0100001100BBBCCC ORRS Rd, Rm
 h0100001100:
+	lodsw			; AX = Rm(lo)
+	or	[di], ax	; Rdn(lo) |= Rm(lo)
+	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	or	[di+hi], ax	; Rdn(hi) |= Rm(hi)
+	ret
+
+	; 0100001101BBBCCC MULS Rd, Rm
 h0100001101:
+	lodsw			; AX = Rm(lo)
+	mov	bx, ax		; remember a copy
+	mul	word [di]	; DX:AX = Rm(lo) * Rd(lo)
+	mov	cx, dx		; CX = Rm(lo) * Rd(lo) (hi)
+	xchg	bx, ax		; BX = Rm * Rd (lo), AX = Rm(lo)
+	mul	word [di+hi]	; AX = Rm(lo) * Rd(hi) (lo), DX = junk
+	add	cx, ax		; CX = Rm(lo)*Rd(lo) (hi) + Rm(lo)*Rd(hi) (lo)
+	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	mul	word [di]	; AX = Rm(hi)*Rd(lo), DX = junk
+	add	cx, ax		; AX = Rm * Rd (hi)
+	mov	[di], bx	; Rd = CX:BX
+	mov	[di+hi], CX
+	ret
+
+	; 0100001110BBBCCC BICS Rd, Rm
 h0100001110:
+	lodsw			; AX = Rm(lo)
+	not	ax		; AX = ~Rm(lo)
+	and	[di], ax	; Rdn(lo) |= Rm(lo)
+	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	not	ax		; AX = ~Rm(hi)
+	and	[di+hi], ax	; Rdn(hi) |= Rm(hi)
+	ret
+
+
+	; 0100001111BBBCCC MVNS Rd, Rm
 h0100001111:
+	lodsw			; AX = Rm(lo)
+	not	ax		; AX = ~Rm(lo)
+	stosw			; Rd(lo) = ~Rm(lo)
+	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	not	ax		; AX = ~Rm(hi)
+	mov	[di+hi-2], ax	; Rd(hI) = ~Rm(hi)
+	ret
 
 h01000100:
 h01000101:

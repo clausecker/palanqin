@@ -3,27 +3,39 @@ Currently implemented instructions:
     ADD   Rd, SP, #imm8
     ADD   Rd, PC, #imm8
     ADD   SP, SP, #imm7
+    ADCS  Rd, Rm
     ADDS  Rd, Rn, #imm3
     ADDS  Rd, #imm8
     ADDS  Rd, Rn, Rm
+    ANDS  Rd, Rm
     ASRS  Rd, Rm, #imm5
     B<c>  label
+    BICS  Rd, Rm
+    CMN   Rn, Rm
     CMP   Rn, #imm8
+    CMP   Rn, Rm
+    EORS  Rn, Rm
     LSLS  Rd, Rm, #imm5
     LSRS  Rd, Rm, #imm5
     MOVS  Rd, #imm8
     MOVS  Rd, Rm
+    MULS  Rd, Rm
+    MVNS  Rd, Rm
     NOP
+    ORRS  Rd, Rm
     REV   Rd, Rm
     REV16 Rd, Rm
     REVSH Rd, Rm
+    RSBS  Rd, Rm, #0
     SEV
+    SBCS  Rd, Rm
     SUB   SP, SP, #imm7
     SUBS  Rd, Rn, #imm3
     SUBS  Rd, #imm8
     SUBS  Rd, Rn, Rm
     SXTB  Rd, Rm
     SXTH  Rd, Rm
+    TST   Rn, Rm
     UDF   #imm8
     UXTB  Rd, Rm
     UXTH  Rd, Rm
