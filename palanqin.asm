@@ -1247,6 +1247,196 @@ fixRd:	mov	si, [zsreg]
 ;; Memory Access                                                              ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+	; Translate an ARM address and return a pointer to a set of
+	; accessor functions.  These functions can then be used to
+	; access the memory behind it.  The offset in AX can be adjusted
+	; by the caller to perform multiple memory accesses on related
+	; addresses, but once it overflows, translate must be called anew.
+	; Expects an ARM address in DX:AX.  Returns a translated address in
+	; DX:AX and a pointer to a structure of accessor functions in BX.
+	; Trashes CX.
+	section	.text
+translate:
+	mov	bl, dh		; load address space nibble
+	and	bx, 0xf0	; isolate address space nibble
+	mov	cl, 3
+	shr	bx, cl		; form a table index
+	jmp	[xlttab+bx]	; call nibble-specific translator
+
+	; Address space translators.  One for each part of the address space.
+	section	.data
+	align	2, db 0
+xlttab:	dw	xltadj		; 00000000--000fffff adjusted memory
+	dw	xltmem		; 10000000--100fffff unadjusted memory
+	dw	xltadj		; 20000000--200fffff adjusted memory (mirror)
+	dw	xltmem		; 30000000--300fffff unadjusted memory (mirror)
+	dw	xltio		; 40000000--4000ffff I/O ports
+	dw	xltnone		; 50000000--5fffffff open bus
+	dw	xltnone		; 60000000--6fffffff open bus
+	dw	xltnone		; 70000000--7fffffff open bus
+	dw	xltnone		; 80000000--8fffffff open bus
+	dw	xltnone		; 90000000--9fffffff open bus
+	dw	xltnone		; a0000000--afffffff open bus
+	dw	xltnone		; b0000000--bfffffff open bus
+	dw	xltnone		; c0000000--cfffffff open bus
+	dw	xltnone		; d0000000--dfffffff open bus
+	dw	xltppb		; e0000000--e00fffff private peripheral bus PPB
+	dw	xltvendor	; f0000000--ffffffff vendor use
+
+	; translator for imgbase adjusted memory
+xltadj:	call	linseg		; translate to segmented address
+	add	dx, [imgbase]	; apply imgbase
+	mov	bx, memmem	; ordinary memory access
+	ret
+
+	; translator for unadjusted memory
+xltmem:	mov	bx, memmem	; ordinary memory access
+	jmp	linseg		; translate to segmented address
+
+	; translator for I/O ports
+xltio:	xor	dx, dx		; ignore high 16 bit of address
+	mov	bx, memio	; I/O memory access
+	ret
+
+	; translator for open bus
+xltnone:mov	bx, memnone	; no memory access
+	ret
+
+	; translator for the private peripheral bus (PPB)
+xltppb:	todo
+
+	; translator for the vendor-use area
+xltvendor:
+	todo
+
+	; Memory accessor functions.  These functions all follow the same
+	; convention: CX:SI holds the translated address, DX:AX holds the datum
+	; to be written (in case of a store function).  On return, DX:AX holds
+	; the datum loaded (in case of a load function).  In case of a store
+	; function, DX:AX is undefined on return.  The function preserves CX:SI
+	; as well as all segment registers.  The caller is responsible for
+	; checking for alignment problems.
+	struc	mem
+.ldr	resw	1		; load word
+.ldrh	resw	1		; load half word
+.ldrb	resw	1		; load byte
+.str	resw	1		; store word
+.strh	resw	1		; store half word
+.strb	resw	1		; store byte
+	endstruc
+
+	; memory accessor functions for ordinary memory
+	section	.data
+memmem	dw	ldrmem
+	dw	ldrhmem
+	dw	ldrbmem
+	dw	strmem
+	dw	strhmem
+	dw	strbmem
+
+	; memory accessor functions for I/O ports
+memio	dw	ldrio
+	dw	ldrhio
+	dw	ldrbio
+	dw	strio
+	dw	strhio
+	dw	strbio
+
+	; memory accessor functions for open bus
+memnone	times	6 dw ldstnone
+
+	; load word from memory
+	section	.text
+ldrmem:	push	ds		; remember old DS
+	mov	ds, cx		; set up DS for CS:SI memory load
+	mov	ax, [si]	; DX:AX = [CX:SI]
+	mov	dx, [si+2]
+	pop	ds		; restore DS
+	ret
+
+	; load half word from memory
+ldrhmem:mov	dx, ds		; remember old DS
+	mov	ds, cx		; set up DS for CS:SI memory load
+	mov	ax, [si]	; AX = [CX:SI]
+	mov	ds, dx		; restore DS
+	ret
+
+	; load byte from memory
+ldrbmem:mov	dx, ds		; remember old DS
+	mov	ds, cx		; set up DS for CS:SI memory load
+	mov	al, [si]	; AL = [CX:SI]
+	mov	ds, dx		; restore DS
+	ret
+
+	; store word to memory
+strmem:	push	ds		; remember old DS
+	mov	ds, cx		; set up DS for CS:SI store
+	mov	[si], ax	; [CX:SI] = AX:DX
+	mov	[si+2], dx
+	pop	ds
+	ret
+
+	; store half word to memory
+strhmem:mov	dx, ds		; remember old DS
+	mov	ds, cx		; set up DS for CS:SI store
+	mov	[si], ax	; [CX:SI] = AX
+	mov	ds, dx		; restore old DS
+	ret
+
+	; store byte to memory
+strbmem:mov	dx, ds		; remember old DS
+	mov	ds, cx		; set up DS for CS:SI store
+	mov	[si], al	; [CX:SI] = AL
+	mov	ds, dx		; restore old DS
+	ret
+
+	; load word from I/O port
+ldrio:	mov	dx, si		; set up DX for IN instruction
+	in	ax, dx		; load low word
+	inc	dx
+	inc	dx		; advance to high port
+	push	ax		; remember low word
+	in	ax, dx		; load high word
+	xchg	ax, dx		; move high word to dx
+	pop	ax		; restore low word
+	ret
+
+	; load half word from I/O port
+ldrhio:	mov	dx, si		; set up DX for IN instruction
+	in	ax, dx		; load word
+	ret
+
+	; load byte from I/O port
+ldrbio:	mov	dx, si		; set up DX for IN instruction
+	in	al, dx		; load byte
+	ret
+
+	; store word to I/O port
+strio:	push	dx		; temporarily remember high word
+	mov	dx, si		; set up DX for OUT instruction
+	out	dx, ax		; store low word
+	inc	dx		; advance to high port
+	inc	dx
+	pop	ax		; load high word
+	out	dx, ax		; store high word
+	ret
+
+	; store half word to I/O port
+strhio:	mov	dx, si		; set up DX for OUT instruction
+	out	dx, ax		; store word
+	ret
+
+	; store byte to I/O port
+strbio:	mov	dx, si		; set up DX for OUT instruction
+	out	dx, al		; store byte
+	ret
+
+	; store nothing/load 0xffffffff
+ldstnone:
+	mov	ax, 0xffff	; DX:AX = -1
+	mov	dx, ax
+	ret
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Address Space Conversion                                                   ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
