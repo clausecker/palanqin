@@ -79,3 +79,13 @@ used to form an error level.
     0xb701
 
 Print the current register contents to the terminal.
+
+    0xb702
+
+Print the low byte of R0 to the console (DOS function 0x02).
+
+    0bx703
+
+Read a character from the console without echo (DOS function 0x08).
+High ASCII characters are returned with 0x100 added to the character
+code.

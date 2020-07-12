@@ -492,11 +492,6 @@ htBA	dw	hBA00		; REV Rd, Rm
 	dw	hBA10		; REV16 Rd, Rm
 	dw	hBA11		; REVSH Rd, Rm
 
-	; jump table for escape hatch instructions
-htB7	dw	hB700		; terminate emulation
-	dw	hB701		; dump registers
-B7max	equ	($-htB7-2)/2	; highest escape hatch number used
-
 	section	.text
 
 	; 000XXAAAAABBBCCC shift immediate
@@ -1525,10 +1520,14 @@ undefined:
 ;; Escape Hatches                                                             ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-	; b700 terminate emulation
-hB700:	strlo	al, 0		; AL = R0(lo) (error level)
-	mov	ah, 0x4c
-	int	0x21		; 0x4c: TERMINATE PROGRAM
+	; jump table for escape hatch instructions
+	section	.data
+	align	2, db 0
+htB7	dw	hB700		; terminate emulation
+	dw	hB701		; dump registers
+	dw	hB702		; console output
+	dw	hB703		; console input (no echo)
+B7max	equ	($-htB7-2)/2	; highest escape hatch number used
 
 	; register dump template
 	section	.data
@@ -1542,9 +1541,13 @@ dump	db	"R0  "
 .endr	db	"NZCV  "
 .nzcv	db	"----", 13, 10, 0
 
+	; b700 terminate emulation
+	section	.text
+hB700:	strlo	al, 0		; AL = R0(lo) (error level)
+	mov	ah, 0x4c
+	int	0x21		; 0x4c: TERMINATE PROGRAM
 
 	; b701 dump registers
-	section	.text
 hB701:	call	fixflags	; set up flags
 	call	pclin		; set up R15
 	mov	di, dump.r0	; load R0 value field
@@ -1572,6 +1575,27 @@ hB701:	call	fixflags	; set up flags
 	mov	byte [di-1], 'V'
 .nv:	mov	si, dump	; load register dump template into DS:SI
 	jmp	puts		; dump registers and return
+
+	; b702 console output
+hB702:	strlo	dl, 0		; AL = R0(lo)
+	mov	ah, 0x02
+	int	0x21		; 0x02: DISPLAY OUTPUT
+	ret
+
+	; b703 console input (no echo)
+hB703:	mov	di, reglo+2*0	; di = &R0
+	mov	word [di+hi], 0	; R0(hi) = 0
+	mov	ah, 0x08
+	int	0x21		; 0x08: NO ECHO CONSOLE INPUT
+	test	al, al		; is this extended ASCII?
+	jz	.ext		; if yes, read again for ext. ASCII character
+	mov	ah, 0x00
+	stosw			; R0(lo) = character
+	ret
+.ext:	int	0x21		; 0x08: NO ECHO CONSOLE INPUT
+	mov	ah, 0x01	; mark as extended ASCII
+	stosw			; R0(lo) = 0x100 + character
+	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; IO Routines                                                                ;;

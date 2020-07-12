@@ -49,3 +49,9 @@ Currently implemented escape hatches:
 
     0xb700 terminate emulation
     0xb701 dump registers
+    0xb702 console output
+    0xb703 console input
+
+Other items to be done:
+
+ - check if there is sufficient memory before loading the image.
