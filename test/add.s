@@ -1,14 +1,14 @@
-	.syntax unified
-	.thumb
+	.include "macros.s"
+
 	.globl _start
 	.thumb_func
-_start:	.hword	0xb701
+_start:	debug
 	add	r7, sp, #0xc4
 	lsrs	r6, r7, #13
-	.hword	0xb701
+	debug
 	subs	r1, r2, #1
 	lsls	r2, r1, #31
-	.hword	0xb701
+	debug
 	adds	r1, r2, r1
-	.hword	0xb701
-	.hword	0xb700
+	debug
+	bye
