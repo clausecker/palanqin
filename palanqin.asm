@@ -1279,6 +1279,7 @@ xlttab:	dw	xltadj		; 00000000--000fffff adjusted memory
 	dw	xltvendor	; f0000000--ffffffff vendor use
 
 	; translator for imgbase adjusted memory
+	section	.text
 xltadj:	call	linseg		; translate to segmented address
 	add	dx, [imgbase]	; apply imgbase
 	mov	bx, memmem	; ordinary memory access
@@ -1436,10 +1437,10 @@ ldstnone:
 ;; Address Space Conversion                                                   ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-	section	.text
 
 	; convert DX:AX into a linear address in DX:AX
 	; trashes CX
+	section	.text
 seglin:	mov	cl, 4
 	rol	dx, cl		; dx = ds >> 12 | ds << 4
 	mov	cx, dx
@@ -1513,6 +1514,7 @@ pclin:	mov	ax, [pcaddr]	; DX:AX = pcaddr
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	; generate an undefined instruction exception
+	section	.text
 undefined:
 	todo			; TODO
 
