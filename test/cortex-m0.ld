@@ -5,7 +5,7 @@ SECTIONS {
 
 	.text : {
 		LONG(0x1000); /* initial stack pointer */
-		LONG(_start); /* entry point */
+		LONG(_start + 1); /* entry point */
 		*(.text.startup);
 		*(.text);
 	}
