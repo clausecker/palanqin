@@ -1179,19 +1179,33 @@ h1101xxxx:
 	jmp	.svc
 
 .taken:	mov	si, bx		; remember insn as pclin trashes BX
-	call	pclin		; DX:AX = R15
-	xchg	ax, si		; AL = #imm8, DX:SI = R15
-	mov	cx, dx		; CX:SI = R15
+	call	pclin		; set up R15 according to pcaddr
+	xchg	ax, si		; AL = #imm8
 	cbw			; AX = #imm8
-	cwd			; DX:AX = #imm8
 	shl	ax, 1		; AX = #imm8:0
-	add	ax, si		; DX:AX = R15 + #imm8
-	adc	dx, cx
-	ldrlo	15, ax		; R15 = DX:AX
-	ldrhi	15, dx
+	cwd			; DX:AX = #imm8
+	add	[reglo+2*15], ax ; R15 += #imm8
+	adc	[reghi+2*15], dx
 	jmp	pcseg		; set up pcaddr according to R15
 
 .svc:	todo			; todo
+
+	; 11100CCCCCCCCCCC B #imm11
+	; 11101XXXXXXXXXXX 32-bit instructions
+h1110:	test	ah, 0x08	; is this B #imm11?
+	jnz	.32bit		; or is it a 32 bit instruction?
+	mov	cl, 5		; sign extend #imm11 into AX
+	shl	ax, cl		; AX=CCCCCCCCCCC00000
+	dec	cx		; keep #imm11 as a word offset
+	sar	ax, cl		; AX=CCCCCCCCCCCCCCC0
+	xchg	ax, si		; stash AX away for pclin call
+	call	pclin		; set up R15 according to pcaddr
+	xchg	ax, si		; AX = #imm11
+	cwd			; DX:AX = #imm11
+	add	[reglo+2*15], ax ; R15 += #imm11
+	adc	[reghi+2*15], dx
+	jmp	pcseg		; set up pcaddr according to R15
+.32bit:	todo
 
 	; instruction handlers that have not been implemented yet
 h0101:
@@ -1199,7 +1213,6 @@ h011:
 h1000:
 h1001:
 h1100:
-h1110:
 h1111:	todo
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

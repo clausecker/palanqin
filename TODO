@@ -10,6 +10,7 @@ Currently implemented instructions:
     ADDS  Rd, Rn, Rm
     ANDS  Rd, Rm
     ASRS  Rd, Rm, #imm5
+    B     label
     B<c>  label
     BICS  Rd, Rm
     CMN   Rn, Rm
