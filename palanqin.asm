@@ -659,22 +659,22 @@ h000111:and	cx, 7		; CX = #imm3
 	pop	word [flags]
 	ret
 
-	; 001XXAAABBBBBBBB add/subtract/compare/move immediate
+	; 001XXBBBCCCCCCCC add/subtract/compare/move immediate
 h001:	mov	bl, ah		; BL = 001XXAAA
 	shr	bl, 1		; BL = 0001XXAA
 	and	bx, 0xc		; BL = 0000XX00
 	xor	si, si		; SI = 0
-	mov	di, [oprA]	; DI = &reglo[Rd]
+	mov	di, [oprB]	; DI = &reglo[Rd]
 	mov	ah, 0		; AX = #imm8
 	mov	[zsreg], di	; set SF and ZF according to Rd
 	jmp	[ht001XX+bx]	; call instruction specific handler
 
-	; 00100AAABBBBBBBB MOVS Rd, #imm8
+	; 00100BBBCCCCCCCC MOVS Rd, #imm8
 h00100:	stosw			; Rd = #imm8
 	mov	[di+hi-2], si
 	ret
 
-	; 00101AAABBBBBBBB CMP Rn, #imm8
+	; 00101BBBCCCCCCCC CMP Rn, #imm8
 h00101:	mov	dx, [di+hi]
 	cmp	[di], ax	; Rd(lo) - #imm8
 	sbb	dx, si		; Rd - #imm8
@@ -683,14 +683,14 @@ h00101:	mov	dx, [di+hi]
 	pop	word [flags]
 	ret
 
-	; 00110AAABBBBBBBB ADDS Rd, #imm8
+	; 00110BBBCCCCCCCC ADDS Rd, #imm8
 h00110:	add	[di], ax	; Rd += AX
 	add	[di+hi], si
 	pushf			; remember flags
 	pop	word [flags]
 	ret
 
-	; 00111AAABBBBBBBB SUBS Rd, #imm8
+	; 00111BBBCCCCCCCC SUBS Rd, #imm8
 h00111:	sub	[di], ax	; Rd -= AX
 	sbb	[di+hi], si
 	cmc			; adjust CF to ARM conventions
@@ -700,7 +700,7 @@ h00111:	sub	[di], ax	; Rd -= AX
 
 	; 010000AAAABBBCCC data-processing register
 	; 010001AACBBBBCCC special data processing
-	; 01001AAABBBBBBBB LDR Rd, [PC, #imm8]
+	; 01001BBBCCCCCCCC LDR Rd, [PC, #imm8]
 h0100:	test	ah, 0x8		; is this LDR Rd, [PC, #imm8]?
 	jnz	.ldr
 	mov	di, [oprC]	; DI = &Rdn
@@ -1080,9 +1080,9 @@ h10111111:
 	ret			; else, treat as NOP
 .it:	jmp	undefined	; generate an undefined instruction exception
 
-	; 1101AAAABBBBBBBB B<c> <label>
-	; 11011110BBBBBBBB UDF #imm8
-	; 11011111BBBBBBBB SVC #imm8
+	; 1101BBBBCCCCCCCC B<c> <label>
+	; 11011110CCCCCCCC UDF #imm8
+	; 11011111CCCCCCCC SVC #imm8
 h1101:	mov	bl, ah		; BL = 1101AAAA
 	xchg	bx, ax		; BX = insn, AL = 1101AAAA
 	shl	al, 1		; AL = 101AAAA0
