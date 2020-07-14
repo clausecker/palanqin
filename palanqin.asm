@@ -317,6 +317,7 @@ imm5rr:	mov	cx, ax		; keep a copy of insn for later
 
 	; decode handler for reg / imm8
 	; instruction layout: XXXX XBBB CCCC CCCC
+	; TODO: oprC isn't actually needed anywere.  Can we skip setting it up?
 rimm8:	xor	cx, cx
 	xchg	ah, cl		; AX=imm8, CX=reg
 	stosw			; oprC=imm8
@@ -676,11 +677,16 @@ h00100:	stosw			; Rd = #imm8
 
 	; 00101BBBCCCCCCCC CMP Rn, #imm8
 h00101:	mov	dx, [di+hi]
-	cmp	[di], ax	; Rd(lo) - #imm8
-	sbb	dx, si		; Rd - #imm8
+	cmp	[di], ax	; Rd(lo) - #imm8 (for ZF and borrow)
+	lahf			; remember ZF according to Rd(lo) - #imm8 in AH
+	sbb	dx, si		; Rd - #imm8 (for CF, SF, OF, and ZF)
 	cmc			; adjust CF to ARM conventions
-	pushf			; and remember flags
-	pop	word [flags]
+	pushf			; load flags in DX
+	pop	dx
+	or	ah, ~ZF		; isolate ZF in AH
+	and	dl, ah		; set ZF in DX if Rn == Rm
+	mov	[flags], dx	; save flags in flags
+	mov	[zsreg], si	; mark flags as fixed
 	ret
 
 	; 00110BBBCCCCCCCC ADDS Rd, #imm8
