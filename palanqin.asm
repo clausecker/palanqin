@@ -1002,30 +1002,30 @@ h10111100:
 h10111101:
 h10111110:	todo
 
-	; 101100A1AAAAABBB (CBZ Rd, #imm5)
+	; 101100B1BBBBBCCC (CBZ Rd, #imm5)
 h10110001 equ	undefined
 h10110011 equ	undefined
 
-	; 10110010XXAAABBB (un)signed extend byte/word
+	; 10110010XXBBBCCC (un)signed extend byte/word
 h10110010:
 	mov	dx, 0xe		; mask for extracting the instruction fields
 	mov	si, reglo
 	mov	di, ax
 	shl	di, 1		; form an offset into the register table
 	and	di, dx		; mask out operand C
-	add	di, si		; oprC = &reglo[C]
+	add	di, si		; DI = &reglo[C]
 
 	mov	bx, ax
 	shr	ax, 1
 	shr	ax, 1		; form an offset into the register table
 	and	ax, dx		; mask out operand B
-	add	si, ax		; oprB = &reglo[B]
+	add	si, ax		; SI = &reglo[B]
 
 	mov	cl, 5
 	shr	bx, cl		; BX = 0000010110010XXA
 	and	bx, dx		; BX = 0000000000000XX0
 	call	fixRd		; set flags on Rd if needed
-	lodsw			; AX = Rm(lo), DI += 2
+	lodsw			; AX = Rm(lo), SI += 2
 	jmp	[htB2+bx]	; jump to instruction handler
 
 	; 1011001000AAABBB SXTH Rd, Rm
@@ -1071,26 +1071,26 @@ h10111000 equ	undefined
 h10111001 equ	undefined
 h10111011 equ	undefined
 
-	; 10111010XXAAABBB reverse bytes
+	; 10111010XXBBBCCC reverse bytes
 h10111010:
 	mov	dx, 0xe		; mask for extracting the instruction fields
 	mov	si, reglo
 	mov	di, ax
 	shl	di, 1		; form an offset into the register table
 	and	di, dx		; mask out operand C
-	add	di, si		; oprC = &reglo[C]
+	add	di, si		; DI = &reglo[C]
 
 	mov	bx, ax
 	shr	ax, 1
 	shr	ax, 1		; form an offset into the register table
 	and	ax, dx		; mask out operand B
-	add	si, ax		; oprB = &reglo[B]
+	add	si, ax		; SI = &reglo[B]
 
 	mov	cl, 5
 	shr	bx, cl		; BX = 0000010111010XXA
 	and	bx, dx		; BX = 0000000000000XX0
 	call	fixRd		; set flags on Rd if needed
-	lodsw			; AX = Rm(lo), DI += 2
+	lodsw			; AX = Rm(lo), SI += 2
 	jmp	[htBA+bx]	; jump to instruction handler
 
 	; 1011101000AAABBB REV Rd, Rm
@@ -1271,8 +1271,9 @@ h1111:	todo
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	; set ZF and SF in flags according to zsreg
-	; trashes AX, DX, and SI
+	; trashes AX and DX.
 fixflags:
+	push	si		; preserve SI
 	mov	si, [zsreg]
 	test	si, si		; flags already fixed?
 	jz	.nofix
@@ -1291,16 +1292,19 @@ fixflags:
 	or	al, ah		; merge the two
 	mov	[flags], al	; write them back
 	mov	[zsreg], dx	; and mark the flags as being fixed
-.nofix:	ret
+.nofix:	pop	si		; restore SI
+	ret
 
 	; compare DI with [zsreg].  If both are equal, fix the flags.
-	; trashes AX, DX, and SI.  Preserves DI which may not be zero.
+	; trashes AX, DX.  Preserves DI which may not be zero.
 	; the intent is to save the flags if Rd == [zsreg] and flag
 	; recovery would otherwise be impossible.
-fixRd:	mov	si, [zsreg]
+fixRd:	push	si		; preserve SI
+	mov	si, [zsreg]
 	cmp	si, di		; is Rd == [zsreg]?
 	je	fixflags.entry	; if yes, fix it up
-	ret			; otherwise, go back to caller
+	pop	si		; otherwise restore SI and return
+	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Memory Access                                                              ;;
