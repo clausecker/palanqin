@@ -18,9 +18,15 @@ Currently implemented instructions:
     CMP   Rn, Rm
     EORS  Rn, Rm
     LDR   Rt, [PC, #imm8]
+    LDR   Rt, [SP, #imm8]
     LDR   Rt, [Rn, #imm5]
+    LDR   Rt, [Rn, Rm]
     LDRB  Rt, [Rn, #imm5]
+    LDRB  Rt, [Rn, Rm]
     LDRH  Rt, [Rn, #imm5]
+    LDRH  Rt, [Rn, Rm]
+    LDRSB Rt, [Rn, Rm]
+    LDRSH Rt, [Rn, Rm]
     LSLS  Rd, Rm, #imm5
     LSRS  Rd, Rm, #imm5
     MOV   Rd, Rm
@@ -36,9 +42,13 @@ Currently implemented instructions:
     RSBS  Rd, Rm, #0
     SEV
     SBCS  Rd, Rm
+    STR   Rt, [SP, #imm8]
     STR   Rt, [Rn, #imm5]
+    STR   Rt, [Rn, Rm]
     STRB  Rt, [Rn, #imm5]
+    STRB  Rt, [Rn, Rm]
     STRH  Rt, [Rn, #imm5]
+    STRH  Rt, [Rn, Rm]
     SUB   SP, SP, #imm7
     SUBS  Rd, Rn, #imm3
     SUBS  Rd, #imm8

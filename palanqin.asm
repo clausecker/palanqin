@@ -244,7 +244,7 @@ step:	mov	bx, pcaddr	; save some bytes in the next few instructions
 	mov	cl, 5		; mask out the instruction's top 4 bits
 	rol	bx, cl		; and form a table offset
 	and	bx, 0x1e	; bx = ([insn] & 0xf000) >> (16 - 4) << 1
-	mov	dx, 0xe		; mask for use with the decode handlers
+	mov	dx, 0x0e	; mask for use with the decode handlers
 	mov	si, reglo	; for use with the decode handlers
 	mov	di, oprC	; for use with the decode handlers
 				; which also assume that AX=insn
@@ -288,7 +288,7 @@ dtXXXX:	dw	imm5rr		; 000XX imm5 / Rm / Rd
 	; 000111 as imm5 / reg / reg again
 d0001:	mov	cx, ax		; make a copy of insn
 	and	ch, 0xc		; mask the two bits 00001100
-	cmp	ch, 0x8		; are these set to 10?
+	cmp	ch, 0x08	; are these set to 10?
 	je	rrr		; if yes, decode as rrr
 				; else fall through and decode as imm5rr
 
@@ -353,9 +353,9 @@ rrr:	mov	cx, ax		; keep a copy of insn for later
 	; 010000... is decoded as imm5 / reg / reg (imm4, really)
 	; 010001... is decoded in a special manner
 	; 01001... is decoded as reg / imm8
-d0100:	test	ah, 0x8		; is this 01001...?
+d0100:	test	ah, 0x08	; is this 01001...?
 	jnz	rimm8		; if yes, decode as reg / imm8
-	test	ah, 0x4		; else, is this 010000...?
+	test	ah, 0x04	; else, is this 010000...?
 	jz	imm5rr		; if yes, decode as imm5 / reg / reg
 
 	; if we get here, we have instruction 0100 01XX CBBB BCCC
@@ -460,6 +460,16 @@ ht010001XX:
 	dw	h01000110	; MOV Rd, Rm
 	dw	h01000111	; BX Rm, BLX Rm
 
+	; jump table for load/store register offset
+ht0101	dw	str		; 0101000 STR   Rt, [Rn, Rm]
+	dw	strh		; 0101001 STRH  Rt, [Rn, Rm]
+	dw	strb		; 0101010 STRB	Rt, [Rn, Rm]
+	dw	ldrsb		; 0101011 LDRSB Rt, [Rn, Rm]
+	dw	ldr		; 0101100 LDR   Rt, [Rn, Rm]
+	dw	ldrh		; 0101101 LDRH  Rt, [Rn, Rm]
+	dw	ldrb		; 0101110 LDRB  Rt, [Rn, Rm]
+	dw	ldrsh		; 0101111 LDRSH Rt, [Rn, Rm]
+
 	; jump table for the miscellaneous instructions 1011XXXX
 	; instructions in parentheses are not available on Cortex-M0
 	; cores and generate an undefined instruction exception.
@@ -499,7 +509,7 @@ htBA	dw	hBA00		; REV Rd, Rm
 	; 00011XYAAABBBCCC add/subtract register/immediate
 h000:	mov	bl, ah		; BL = 000XXAAA
 	shr	bl, 1		; BL = 0000XXAA
-	and	bx, 0xe		; BL = 0000XXA0
+	and	bx, 0x0e	; BL = 0000XXA0
 	mov	si, [oprB]	; SI = &reglo[Rm]
 	mov	di, [oprC]	; DI = &reglo[Rd]
 	mov	[zsreg], di	; set SF and ZF according to Rd
@@ -709,16 +719,16 @@ h00111:	sub	[di], ax	; Rd -= AX
 	; 01001BBBCCCCCCCC LDR Rd, [PC, #imm8]
 h0100:	mov	di, [oprC]	; DI = &Rdn
 	mov	si, [oprB]	; SI = &Rm
-	test	ah, 0x8		; is this LDR Rd, [PC, #imm8]?
+	test	ah, 0x08	; is this LDR Rd, [PC, #imm8]?
 	jnz	.ldr
 	mov	[zsreg], di	; set flags according to Rdn
-	test	ah, 0x4		; else, is this special data processing?
+	test	ah, 0x04	; else, is this special data processing?
 	jnz	.sdp		; otherwise, it's data-processing register
 	mov	bx, [oprA]	; BX = 0000AAAA
 	shl	bx, 1		; BX = 000AAAA0
 	jmp	[ht010000XXXX+bx]
 .sdp:	mov	bl, ah		; BL = 010001AA
-	and	bx, 0x3		; BX = 000000AA
+	and	bx, 0x03	; BX = 000000AA
 	shl	bx, 1		; BX = 00000AA0
 	call	fixRd		; fix flags if needed
 	jmp	[ht010001XX+bx]
@@ -914,6 +924,19 @@ h01000110:
 h01000111:
 	todo
 
+	; 0101XXXAAABBBCCC load/store register offset
+h0101:	mov	bl, ah		; BL = 0101XXXA
+	and	bx, 0x0e	; BL = 0000XXX0
+	mov	di, [oprC]	; DI = &Rt
+	call	fixRd		; fix flags for Rt
+	mov	si, [oprB]	; SI = &Rn
+	lodsw			; DX:AX = Rn
+	mov	dx, [si+hi-2]
+	mov	si, [oprA]	; SI = &rm
+	add	ax, [si]	; DX:AX = Rn + Rm
+	adc	dx, [si+hi]
+	jmp	[ht0101+bx]	; perform instruction behaviour
+
 	; 01100AAAAABBBCCC STR	Rt, [Rn, #imm5]
 	; 01110AAAAABBBCCC STRB Rt, [Rn, #imm5]
 	; 01101AAAAABBBCCC LDR  Rt, [Rn, #imm5]
@@ -958,6 +981,23 @@ h1000:	xchg	ax, cx		; CX = instruction
 	jz	.strh		; otherwise it is STRH
 	jmp	ldrh
 .strh:	jmp	strh
+
+	; 10010BBBCCCCCCCC STR Rd, [SP, #imm8]
+	; 10011BBBCCCCCCCC LDR Rd, [SP, #imm8]
+h1001:	xchg	ax, cx		; CX = instruction
+	mov	di, [oprB]	; DI = &Rt
+	call	fixRd
+	xor	ax, ax
+	mov	al, cl		; AX = #imm8
+	shl	ax, 1		; AX = #imm8 << 2
+	shl	ax, 1
+	xor	dx, dx
+	add	ax, [reglo+2*13] ; DX:AX = SP + #imm8
+	adc	dx, [reghi+2*13]
+	test	ch, 0x08	; is this LDR?
+	jz	.str		; otherwise it is STR
+	jmp	ldr
+.str:	jmp	str
 
 	; 10100BBBCCCCCCCC ADD Rd, PC, #imm8 (ADR Rd, label)
 	; 10101BBBCCCCCCCC ADD Rd, SP, #imm8
@@ -1015,7 +1055,7 @@ h10110011 equ	undefined
 
 	; 10110010XXBBBCCC (un)signed extend byte/word
 h10110010:
-	mov	dx, 0xe		; mask for extracting the instruction fields
+	mov	dx, 0x0e	; mask for extracting the instruction fields
 	mov	si, reglo
 	mov	di, ax
 	shl	di, 1		; form an offset into the register table
@@ -1080,7 +1120,7 @@ h10111011 equ	undefined
 
 	; 10111010XXBBBCCC reverse bytes
 h10111010:
-	mov	dx, 0xe		; mask for extracting the instruction fields
+	mov	dx, 0x0e	; mask for extracting the instruction fields
 	mov	si, reglo
 	mov	di, ax
 	shl	di, 1		; form an offset into the register table
@@ -1267,8 +1307,6 @@ h1110:	test	ah, 0x08	; is this B #imm11?
 .32bit:	todo
 
 	; instruction handlers that have not been implemented yet
-h0101:
-h1001:
 h1100:
 h1111:	todo
 
@@ -1522,9 +1560,20 @@ ldr:	call	translate	; DX:AX: translated address, BX: handler
 ldrh:	call	translate	; DX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = DX:AX
 	mov	cx, dx
-	call	[bx+mem.ldrh]	; DX:AX = mem[CX:SI]
+	call	[bx+mem.ldrh]	; AX = mem[CX:SI]
 	stosw			; Rt = mem[CX:SI]
 	mov	word [di+hi-2], 0
+	ret
+
+	; load signed halfword from ARM address DX:AX and deposit into the
+	; the register pointed to by DI.
+ldrsh:	call	translate	; DX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = DX:AX
+	mov	cx, dx
+	call	[bx+mem.ldrh]	; AX = mem[CX:SI]
+	cwd			; DX:AX = mem[CX:SI]
+	stosw			; Rt = mem[CX:SI] (sign extended)
+	mov	[di+hi-2], dx
 	ret
 
 	; load byte from ARM address DX:AX, zero-extend and deposit into the
@@ -1537,6 +1586,18 @@ ldrb:	call	translate	; DX:AX: translated address, BX: handler
 	xor	ax, ax
 	stosb
 	mov	[di+hi-2], ax
+	ret
+
+	; load signed byte from ARM address DX:AX and deposit into the
+	; the register pointed to by DI.
+ldrsb:	call	translate	; DX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = DX:AX
+	mov	cx, dx
+	call	[bx+mem.ldrb]	; AL = mem[CX:SI]
+	cbw			; AX = mem[CS:SI]
+	cwd			; DX:AX = mem[CX:SI]
+	stosw			; Rt = mem[CX:SI] (sign extended)
+	mov	[di+hi-2], dx
 	ret
 
 	; store word from register pointed to by DI to ARM address DX:AX.
