@@ -17,6 +17,9 @@ Currently implemented instructions:
     CMP   Rn, #imm8
     CMP   Rn, Rm
     EORS  Rn, Rm
+    LDR   Rt, [PC, #imm8]
+    LDR   Rt, [Rn, #imm5]
+    LDRB  Rt, [Rn, #imm5]
     LSLS  Rd, Rm, #imm5
     LSRS  Rd, Rm, #imm5
     MOV   Rd, Rm
@@ -32,6 +35,8 @@ Currently implemented instructions:
     RSBS  Rd, Rm, #0
     SEV
     SBCS  Rd, Rm
+    STR   Rt, [Rn, #imm5]
+    STRB  Rt, [Rn, #imm5]
     SUB   SP, SP, #imm7
     SUBS  Rd, Rn, #imm3
     SUBS  Rd, #imm8
@@ -56,3 +61,5 @@ Currently implemented escape hatches:
 Other items to be done:
 
  - check if there is sufficient memory before loading the image.
+ - keep a pointer to the emulator state in bp for shorter encodings
+   and to free the ds register.

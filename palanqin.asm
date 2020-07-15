@@ -707,23 +707,31 @@ h00111:	sub	[di], ax	; Rd -= AX
 	; 010000AAAABBBCCC data-processing register
 	; 010001AACBBBBCCC special data processing
 	; 01001BBBCCCCCCCC LDR Rd, [PC, #imm8]
-h0100:	test	ah, 0x8		; is this LDR Rd, [PC, #imm8]?
+h0100:	mov	di, [oprC]	; DI = &Rdn
+	mov	si, [oprB]	; SI = &Rm
+	test	ah, 0x8		; is this LDR Rd, [PC, #imm8]?
 	jnz	.ldr
-	mov	di, [oprC]	; DI = &Rdn
 	mov	[zsreg], di	; set flags according to Rdn
 	test	ah, 0x4		; else, is this special data processing?
 	jnz	.sdp		; otherwise, it's data-processing register
-	mov	si, [oprB]	; SI = &Rm
 	mov	bx, [oprA]	; BX = 0000AAAA
 	shl	bx, 1		; BX = 000AAAA0
 	jmp	[ht010000XXXX+bx]
-.sdp:	call	fixRd		; fix flags if needed
-	mov	si, [oprB]	; SI = &Rm
-	mov	bl, ah		; BL = 010001AA
+.sdp:	mov	bl, ah		; BL = 010001AA
 	and	bx, 0x3		; BX = 000000AA
 	shl	bx, 1		; BX = 00000AA0
+	call	fixRd		; fix flags if needed
 	jmp	[ht010001XX+bx]
-.ldr:	todo			; TODO
+	; 01001BBBCCCCCCCC LDR Rt, [PC, #imm8]
+.ldr:	xchg	si, di		; set up DI = &Rt, SI = #imm8
+	call	fixRd		; set flags on Rd if needed
+	call	pclin		; DX:AX = R15
+	and	al, ~3		; DX:AX = R15 aligned to word boundary
+	shl	si, 1		; CX = #imm8 << 2
+	shl	si, 1
+	add	ax, si		; DX:AX = R15 + #imm8
+	adc	dx, 0
+	jmp	ldr		; perform the actual load
 
 	; 0100000000BBBCCC ANDS Rdn, Rm
 h0100000000:
@@ -905,6 +913,44 @@ h01000110:
 	; BX Rm
 h01000111:
 	todo
+
+	; 01100AAAAABBBCCC STR	Rt, [Rn, #imm5]
+	; 01110AAAAABBBCCC STRB Rt, [Rn, #imm5]
+	; 01101AAAAABBBCCC LDR  Rt, [Rn, #imm5]
+	; 01111AAAAABBBCCC LDRB Rt, [Rn, #imm5]
+h011:	xchg	ax, cx		; CX = instruction
+	mov	di, [oprC]	; DI = &Rt
+	test	ch, 0x08	; is this LDR(B) or STR(B)?
+	jz	.str
+	call	fixRd		; fix flags on Rt
+	mov	si, [oprB]	; SI = &Rn
+	lodsw			; DX:AX = Rn
+	mov	dx, [si+hi-2]
+	mov	bx, [oprA]	; BX = #imm5
+	test	ch, 0x10	; is this LDR or LDRB?
+	jnz	.ldrb
+	shl	bx, 1		; BX = #imm5 << 2
+	shl	bx, 1
+	add	ax, bx		; DX:AX = Rn + #imm5 << 2
+	adc	dx, 0
+	jmp	ldr		; perform Rt = mem[Rn, #imm5]
+.ldrb:	add	ax, bx		; DX:AX = Rn + #imm5
+	adc	dx, 0
+	jmp	ldrb
+.str:	mov	si, [oprB]	; SI = &Rn
+	lodsw			; DX:AX = Rn
+	mov	dx, [si+hi-2]
+	mov	bx, [oprA]	; BX = #imm5
+	test	ch, 0x10	; is this STR or STRB?
+	jnz	.strb
+	shl	bx, 1		; BX = #imm5 << 2
+	shl	bx, 1
+	add	ax, bx		; DX:AX = Rn + #imm5 << 2
+	adc	dx, 0
+	jmp	str		; perform mem[Rn, #imm5] = Rt
+.strb:	add	ax, bx		; DX:AX = Rn + #imm5
+	adc	dx, 0
+	jmp	strb
 
 	; 10100BBBCCCCCCCC ADD Rd, PC, #imm8 (ADR Rd, label)
 	; 10101BBBCCCCCCCC ADD Rd, SP, #imm8
@@ -1215,7 +1261,6 @@ h1110:	test	ah, 0x08	; is this B #imm11?
 
 	; instruction handlers that have not been implemented yet
 h0101:
-h011:
 h1000:
 h1001:
 h1100:
@@ -1451,6 +1496,43 @@ ldstnone:
 	mov	ax, 0xffff	; DX:AX = -1
 	mov	dx, ax
 	ret
+
+	; load word from ARM address DX:AX and deposit into the register
+	; pointed to by DI.
+ldr:	call	translate	; DX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = DX:AX
+	mov	cx, dx
+	call	[bx+mem.ldr]	; DX:AX = mem[CX:SI]
+	stosw			; Rt = mem[CX:SI]
+	mov	[di+hi-2], dx
+	ret
+
+	; load byte from ARM address DX:AX, zero-extend and deposit into the
+	; register pointed to by DI.
+ldrb:	call	translate	; DX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = DX:AX
+	mov	cx, dx
+	call	[bx+mem.ldrb]	; AL = mem[CX:SI]
+	stosb			; Rt = mem[CX:SI]
+	xor	ax, ax
+	stosb
+	mov	[di+hi-2], ax
+	ret
+
+	; store word from register pointed to by DI to ARM address DX:AX.
+str:	call	translate	; DX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = DX:AX
+	mov	cx, dx
+	mov	ax, [di]	; DX:AX = Rt
+	mov	dx, [di+hi]
+	jmp	[bx+mem.str]
+
+	; store byte from register pointed to by DI to ARM address DX:AX.
+strb:	call	translate	; DX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = DX:AX
+	mov	cx, dx
+	mov	al, [di]	; AL = Rt
+	jmp	[bx+mem.strb]
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Address Space Conversion                                                   ;;
