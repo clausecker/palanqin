@@ -69,6 +69,7 @@ Currently implemented escape hatches:
     0xb701 dump registers
     0xb702 console output
     0xb703 console input
+    0bx704 check input status
 
 Other items to be done:
 

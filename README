@@ -89,3 +89,8 @@ Print the low byte of R0 to the console (DOS function 0x02).
 Read a character from the console without echo (DOS function 0x08).
 High ASCII characters are returned with 0x100 added to the character
 code.
+
+    0xb704
+
+Check for the availability of a keystroke.  Return -1 or 0 in R0
+to indicate if a keystroke is available (-1) or not available (0).

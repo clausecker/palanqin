@@ -1718,6 +1718,7 @@ htB7	dw	hB700		; terminate emulation
 	dw	hB701		; dump registers
 	dw	hB702		; console output
 	dw	hB703		; console input (no echo)
+	dw	hB704		; check input status
 B7max	equ	($-htB7-2)/2	; highest escape hatch number used
 
 	; register dump template
@@ -1786,6 +1787,14 @@ hB703:	mov	di, reglo+2*0	; di = &R0
 .ext:	int	0x21		; 0x08: NO ECHO CONSOLE INPUT
 	mov	ah, 0x01	; mark as extended ASCII
 	stosw			; R0(lo) = 0x100 + character
+	ret
+
+	; b704 check input status
+hB704:	mov	ah, 0x0b
+	int	0x21		; 0x0B: CHECK INPUT STATUS
+	cbw			; AX: input status
+	ldrlo	0, ax		; R0 = input status
+	ldrhi	0, ax
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
