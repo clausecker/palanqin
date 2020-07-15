@@ -932,7 +932,7 @@ h011:	xchg	ax, cx		; CX = instruction
 .b:	add	ax, bx		; DX:AX = Rn + #imm5 << 2
 	adc	dx, 0
 	test	ch, 0x08	; is this LDR(B)?
-	jz	.str		; otherwise it is STR(B).
+	jz	.str		; otherwise it is STR(B)
 	test	ch, 0x10	; is this LDR or LDRB?
 	jnz	.ldrb
 	jmp	ldr
@@ -941,6 +941,23 @@ h011:	xchg	ax, cx		; CX = instruction
 	jnz	.strb
 	jmp	str
 .strb:	jmp	strb
+
+	; 10000AAAAABBBCCC STRH Rt, [Rn, #imm5]
+	; 10001AAAAABBBCCC LDRH Rt, [Rn, #imm5]
+h1000:	xchg	ax, cx		; CX = instruction
+	mov	si, [oprB]	; SI = &Rn
+	mov	di, [oprC]	; DI = &Rt
+	call	fixRd		; fix flags on Rt
+	mov	bx, [oprA]	; BX = #imm5
+	shl	bx, 1		; BX = #imm5 << 1
+	lodsw			; DX:AX = Rn
+	mov	dx, [si+hi-2]
+	add	ax, bx		; DX:AX = Rn + #imm5 << 1
+	adc	dx, 0
+	test	ch, 0x08	; LDRH?
+	jz	.strh		; otherwise it is STRH
+	jmp	ldrh
+.strh:	jmp	strh
 
 	; 10100BBBCCCCCCCC ADD Rd, PC, #imm8 (ADR Rd, label)
 	; 10101BBBCCCCCCCC ADD Rd, SP, #imm8
@@ -1251,7 +1268,6 @@ h1110:	test	ah, 0x08	; is this B #imm11?
 
 	; instruction handlers that have not been implemented yet
 h0101:
-h1000:
 h1001:
 h1100:
 h1111:	todo
@@ -1501,6 +1517,16 @@ ldr:	call	translate	; DX:AX: translated address, BX: handler
 	mov	[di+hi-2], dx
 	ret
 
+	; load halfword from ARM address DX:AX and deposit into the register
+	; pointed to by DI.
+ldrh:	call	translate	; DX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = DX:AX
+	mov	cx, dx
+	call	[bx+mem.ldrh]	; DX:AX = mem[CX:SI]
+	stosw			; Rt = mem[CX:SI]
+	mov	word [di+hi-2], 0
+	ret
+
 	; load byte from ARM address DX:AX, zero-extend and deposit into the
 	; register pointed to by DI.
 ldrb:	call	translate	; DX:AX: translated address, BX: handler
@@ -1520,6 +1546,13 @@ str:	call	translate	; DX:AX: translated address, BX: handler
 	mov	ax, [di]	; DX:AX = Rt
 	mov	dx, [di+hi]
 	jmp	[bx+mem.str]
+
+	; store halfword from register pointed to by DI to ARM address DX:AX.
+strh:	call	translate	; DX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = DX:AX
+	mov	cx, dx
+	mov	ax, [di]	; AX = Rt
+	jmp	[bx+mem.strh]
 
 	; store byte from register pointed to by DI to ARM address DX:AX.
 strb:	call	translate	; DX:AX: translated address, BX: handler

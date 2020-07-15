@@ -20,6 +20,7 @@ Currently implemented instructions:
     LDR   Rt, [PC, #imm8]
     LDR   Rt, [Rn, #imm5]
     LDRB  Rt, [Rn, #imm5]
+    LDRH  Rt, [Rn, #imm5]
     LSLS  Rd, Rm, #imm5
     LSRS  Rd, Rm, #imm5
     MOV   Rd, Rm
@@ -37,6 +38,7 @@ Currently implemented instructions:
     SBCS  Rd, Rm
     STR   Rt, [Rn, #imm5]
     STRB  Rt, [Rn, #imm5]
+    STRH  Rt, [Rn, #imm5]
     SUB   SP, SP, #imm7
     SUBS  Rd, Rn, #imm3
     SUBS  Rd, #imm8
