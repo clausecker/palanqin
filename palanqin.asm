@@ -919,38 +919,28 @@ h01000111:
 	; 01101AAAAABBBCCC LDR  Rt, [Rn, #imm5]
 	; 01111AAAAABBBCCC LDRB Rt, [Rn, #imm5]
 h011:	xchg	ax, cx		; CX = instruction
-	mov	di, [oprC]	; DI = &Rt
-	test	ch, 0x08	; is this LDR(B) or STR(B)?
-	jz	.str
-	call	fixRd		; fix flags on Rt
 	mov	si, [oprB]	; SI = &Rn
+	mov	di, [oprC]	; DI = &Rt
+	call	fixRd		; fix flags on Rt
+	mov	bx, [oprA]	; BX = #imm5
 	lodsw			; DX:AX = Rn
 	mov	dx, [si+hi-2]
-	mov	bx, [oprA]	; BX = #imm5
+	test	ch, 0x10	; byte instruction?
+	jnz	.b		; if not, scale immediate
+	shl	bx, 1		; BX = #imm5 << 2
+	shl	bx, 1
+.b:	add	ax, bx		; DX:AX = Rn + #imm5 << 2
+	adc	dx, 0
+	test	ch, 0x08	; is this LDR(B)?
+	jz	.str		; otherwise it is STR(B).
 	test	ch, 0x10	; is this LDR or LDRB?
 	jnz	.ldrb
-	shl	bx, 1		; BX = #imm5 << 2
-	shl	bx, 1
-	add	ax, bx		; DX:AX = Rn + #imm5 << 2
-	adc	dx, 0
-	jmp	ldr		; perform Rt = mem[Rn, #imm5]
-.ldrb:	add	ax, bx		; DX:AX = Rn + #imm5
-	adc	dx, 0
-	jmp	ldrb
-.str:	mov	si, [oprB]	; SI = &Rn
-	lodsw			; DX:AX = Rn
-	mov	dx, [si+hi-2]
-	mov	bx, [oprA]	; BX = #imm5
-	test	ch, 0x10	; is this STR or STRB?
+	jmp	ldr
+.ldrb:	jmp	ldrb
+.str:	test	ch, 0x10	; is this STR or STRB?
 	jnz	.strb
-	shl	bx, 1		; BX = #imm5 << 2
-	shl	bx, 1
-	add	ax, bx		; DX:AX = Rn + #imm5 << 2
-	adc	dx, 0
-	jmp	str		; perform mem[Rn, #imm5] = Rt
-.strb:	add	ax, bx		; DX:AX = Rn + #imm5
-	adc	dx, 0
-	jmp	strb
+	jmp	str
+.strb:	jmp	strb
 
 	; 10100BBBCCCCCCCC ADD Rd, PC, #imm8 (ADR Rd, label)
 	; 10101BBBCCCCCCCC ADD Rd, SP, #imm8
