@@ -1148,16 +1148,16 @@ hBA00:	xchg	ah, al		; reverse Rm(lo)
 	mov	[di+hi], ax
 	ret
 
-	; 1011101001XXXXXX undefined
-hBA01	equ	undefined
-
-	; 1011101010AAABBB REV16 Rd, Rm
-hBA10:	xchg	ah, al		; reverse Rm(lo)
+	; 1011101001AAABBB REV16 Rd, Rm
+hBA01:	xchg	ah, al		; reverse Rm(lo)
 	stosw			; Rd(lo) = REV(Rm(lo))
 	mov	ax, [si+hi-2]	; AX = Rm(hi)
 	xchg	ah, al		; reverse Rm(hi)
 	mov	[di+hi-2], ax	; Rd(hi) = REV(Rm(hi))
 	ret
+
+	; 1011101010XXXXXX undefined
+hBA10	equ	undefined
 
 	; 1011101011AAABBB REVSH Rd, Rm
 hBA11:	xchg	ah, al		; reverse Rm(lo)
