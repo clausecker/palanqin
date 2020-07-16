@@ -2,7 +2,9 @@
 
 	.globl _start
 	.thumb_func
-_start:	ldr	r0, =0x6c6c6548	@ 'hell'
+
+	@ print "Hello World!" using shifts and loads
+_start:	ldr	r0, =0x6c6c6548	@ 'Hell'
 	emit
 	lsrs	r0, r0, #8
 	emit
@@ -31,4 +33,15 @@ _start:	ldr	r0, =0x6c6c6548	@ 'hell'
 	rev16	r0, r0
 	emit
 
-	bye
+	@ print a string using a loop
+	adr	r1, string
+0:	ldrb	r0, [r1]
+	adds	r1, r1, #1
+	cmp	r0, #0
+	beq	1f
+	emit
+	b	0b
+1:	bye
+
+	.balign	4
+string:	.string	"\r\nJedem Anfang wohnt ein Zauber inne."
