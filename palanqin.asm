@@ -1006,6 +1006,7 @@ h1010:	mov	di, [oprB]	; di = &Rd
 	jnz	.sp		; if not, this is ADD Rd, PC, #imm8
 	call	fixRd		; fix up flags to Rd if needed
 	call	pclin		; DX:AX = R15
+	and	al, ~3		; align PC to 4 bytes
 	jmp	.fi
 .sp:	call	fixRd		; fix up flags to Rd if needed
 	strlo	ax, 13		; load SP into DX:AX
