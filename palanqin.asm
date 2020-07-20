@@ -196,10 +196,6 @@ state	equ	$
 reglo	resw	16		; ARM registers, low  hwords
 reghi	resw	16		; ARM registers, high hwords
 hi	equ	reghi-reglo	; to turn a reglo pointer into a reghi pointer
-pcaddr	resd	1		; location of the next instruction as a segment/
-				; offset pair.  The PC register in the register
-				; set is only updated as needed to increase
-				; performance.
 imgbase	resw	1		; emulator image base segment
 flags	resw	1		; CPU flags in 8086 format
 				; only CF, ZF, SF, and OF are meaningful
@@ -220,26 +216,30 @@ oprA	resw	1		; first operand (towards most significant bit)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	section	.text
+	; load one instruction into AX and advance PC past it.
+	; trashes BX, CX, and SI.
+ifetch:	mov	bx, reglo+2*15	; BX = &PC
+	mov	ax, [bx]	; DX:AX = PC
+	mov	dx, [bx+hi]
+	and	al, ~1		; clear thumb bit
+	add	word [bx], 2	; PC += 2
+	adc	word [bx+hi], 0
+	call	translate	; BX: handler, DX:AX: address
+	xchg	ax, si		; CX:SI = DX:AX
+	mov	cx, dx
+	jmp	[bx+mem.ldrh]	; AX = instruction
+
 	; run the emulation until we need to stop for some reason
 run:	push	cs		; set up es = ds = cs
 	push	cs
 	pop	ds
 	pop	es
-	call	pcseg		; find the address of the next instruction
 .step:	call	step		; simulate one instruction
 	jmp	.step		; do it again and again
 
 	; simulate one instruction.  Assumes ES=DS=CS.
-step:	mov	bx, pcaddr	; save some bytes in the next few instructions
-	push	ds		; remember DS to free a segment selector
-	lds	si, [bx]	; load the program counter into DS:SI
-	lodsw			; load an instruction
-	pop	ds		; restore DS=CS
-	mov	[bx], si	; update pcaddr with new offset
-	test	si, si		; did we overflow the segment?
-	jnz	.1		; if yes, apply overflow to pcaddr
-	add	byte [bx+3], 0x10
-.1:	push	ax		; push a copy of the current instruction
+step:	call	ifetch		; fetch instruction
+	push	ax		; push a copy of the current instruction
 	mov	bx, ax		; and keep another one in AX
 	mov	cl, 5		; mask out the instruction's top 4 bits
 	rol	bx, cl		; and form a table offset
@@ -735,12 +735,14 @@ h0100:	mov	di, [oprC]	; DI = &Rdn
 	; 01001BBBCCCCCCCC LDR Rt, [PC, #imm8]
 .ldr:	xchg	si, di		; set up DI = &Rt, SI = #imm8
 	call	fixRd		; set flags on Rd if needed
-	call	pclin		; DX:AX = R15
-	and	al, ~3		; DX:AX = R15 aligned to word boundary
-	shl	si, 1		; CX = #imm8 << 2
+	strlo	ax, 15		; DX:AX = R15
+	strhi	dx, 15
+	shl	si, 1		; CX = #imm8 << 2 + 2
+	inc	si
 	shl	si, 1
 	add	ax, si		; DX:AX = R15 + #imm8
 	adc	dx, 0
+	and	al, ~3		; align to word boundary
 	jmp	ldr		; perform the actual load
 
 	; 0100000000BBBCCC ANDS Rdn, Rm
@@ -1005,8 +1007,11 @@ h1010:	mov	di, [oprB]	; di = &Rd
 	test	ah, 0x8		; is this ADD Rd, SP, #imm8?
 	jnz	.sp		; if not, this is ADD Rd, PC, #imm8
 	call	fixRd		; fix up flags to Rd if needed
-	call	pclin		; DX:AX = R15
-	and	al, ~3		; align PC to 4 bytes
+	mov	ax, 2		; DX:AX = 2
+	cwd
+	add	ax, [reglo+2*15] ; DX:AX = R15 + 2
+	adc	dx, [reghi+2*15]
+	and	al, ~3		; aligned to word boundary
 	jmp	.fi
 .sp:	call	fixRd		; fix up flags to Rd if needed
 	strlo	ax, 13		; load SP into DX:AX
@@ -1278,15 +1283,16 @@ h1101xxxx:
 	align	4, int3
 	jmp	.svc
 
-.taken:	mov	si, bx		; remember insn as pclin trashes BX
-	call	pclin		; set up R15 according to pcaddr
-	xchg	ax, si		; AL = #imm8
+.taken:	xchg	ax, bx		; AL = #imm8
 	cbw			; AX = #imm8
-	shl	ax, 1		; AX = #imm8:0
-	cwd			; DX:AX = #imm8
-	add	[reglo+2*15], ax ; R15 += #imm8
+	inc	ax		; AX = #imm8 + 1
+	shl	ax, 1		; AX = #imm8:0 + 2
+	cwd			; DX:AX = #imm8 + 2
+	add	[reglo+2*15], ax ; R15 += #imm8 + 2 + 2
+				; note that R15 had already been advanced by two
+				; in the initial ifetch call.
 	adc	[reghi+2*15], dx
-	jmp	pcseg		; set up pcaddr according to R15
+	ret
 
 .svc:	todo			; todo
 
@@ -1298,13 +1304,12 @@ h1110:	test	ah, 0x08	; is this B #imm11?
 	shl	ax, cl		; AX=CCCCCCCCCCC00000
 	dec	cx		; keep #imm11 as a word offset
 	sar	ax, cl		; AX=CCCCCCCCCCCCCCC0
-	xchg	ax, si		; stash AX away for pclin call
-	call	pclin		; set up R15 according to pcaddr
-	xchg	ax, si		; AX = #imm11
-	cwd			; DX:AX = #imm11
-	add	[reglo+2*15], ax ; R15 += #imm11
+	inc	ax		; AX = #imm11 + 2
+	inc	ax
+	cwd			; DX:AX = #imm11 + 2
+	add	[reglo+2*15], ax ; R15 += #imm11 + 2
 	adc	[reghi+2*15], dx
-	jmp	pcseg		; set up pcaddr according to R15
+	ret
 .32bit:	todo
 
 	; instruction handlers that have not been implemented yet
@@ -1650,55 +1655,6 @@ linseg:	and	dx, 0xf
 	xor	ah, ah		; ax = ax & 0x00ff
 	ret
 
-	; determine the segmented address of the current instruction from PC
-	; and load it into pcaddr.  Trashes CX.  Assumes DS=CS.
-	; If PC cannot be represented as an address, an exception is caused.
-pcseg:	strlo	ax, 15		; load PC into DX:AX
-	strhi	dx, 15
-	mov	ch, dh		; keep a copy of the top 4 bit of PC
-	and	al, ~1		; clear thumb bit if needed
-	call	linseg		; set up linear address in DX:AX
-	and	ch, 0xf0	; isolate address space nibble
-	jnz	.not0		; address space 0 (adjusted)?
-	add	dx, [imgbase]	; apply address space adjustment
-	jmp	.wb
-.not0:	cmp	ch, 2		; address space 2 (unadjusted)?
-	jne	.wild		; if not, this address cannot be translated
-.wb:	mov	[pcaddr], ax	; set up translated PC with DX:AX
-	mov	[pcaddr+2], dx
-	ret
-
-.wild:	todo			; TODO: generate an exception or something
-	jmp	.wild		; endless loop
-
-	; determine the linear address of the current instruction from pcaddr
-	; and load it into PC.  It is assumed that PC points into the right
-	; address space already.  Trashes AX, BX, CX, and DX.  Returns the value
-	; of R15 in DX:AX.  Assumes DS=CS.  Note that as this function is called
-	; after pcaddr has been incremented to point right past the current
-	; instruction, there is a certain asymmetry to pcseg which assumes that
-	; R15 points directly to the instruction to execute.  As usual on ARM,
-	; R15 is updated to point 4 bytes ahead of the current instruction, ie.
-	; 2 bytes ahead of pcaddr.
-pclin:	mov	ax, [pcaddr]	; DX:AX = pcaddr
-	mov	dx, [pcaddr+2]
-	strhi	bh, 1+15	; load R15 high byte into BH
-	and	bx, 0xf000	; isolate address space nibble
-	jnz	.not0		; address space 0 (adjusted)?
-	sub	dx, [imgbase]	; remove address space adjustment
-	jmp	.wb
-.not0:	cmp	bh, 2		; address space 2 (unadjusted)?
-	jne	.wild		; if not, this address cannot be translated
-.wb:	call	seglin		; convert into a linear address
-	add	ax, 2		; advance to current insn + 4
-	adc	dx, bx		; carry and apply address space nibble
-	ldrlo	15, ax		; write DX:AX to R15
-	ldrhi	15, dx
-	ret
-
-.wild:	todo			; TODO: generate an exception or something
-	jmp	.wild		; endless loop
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Exceptions, Events, and Interrupts                                         ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1742,7 +1698,6 @@ hB700:	strlo	al, 0		; AL = R0(lo) (error level)
 
 	; b701 dump registers
 hB701:	call	fixflags	; set up flags
-	call	pclin		; set up R15
 	mov	di, dump.r0	; load R0 value field
 	mov	si, reglo	; for shorter instruction encodings
 .regs:	mov	ax, [si+hi]	; AX = reg(hi)
