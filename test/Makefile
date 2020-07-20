@@ -1,13 +1,10 @@
 AS=arm-none-eabi-gcc -mcpu=cortex-m0
 LD=arm-none-eabi-ld -T cortex-m0.ld
 
-.SUFFIXES: .img .elf
+.SUFFIXES: .elf .img
 
-.s.img:
-	$(AS) -c -o $*.o $<
-	$(LD) -o $*.elf $*.o
-	objcopy -O binary $*.elf $@
-	rm -f $*.o $*.elf
+.elf.img:
+	objcopy -O binary $< $@
 
 .s.elf:
 	$(AS) -c -o $*.o $<
