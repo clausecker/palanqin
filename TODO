@@ -10,6 +10,7 @@ Currently implemented instructions:
     ADDS  Rd, Rn, Rm
     ANDS  Rd, Rm
     ASRS  Rd, Rm, #imm5
+    ASRS  Rd, Rm
     B     label
     B<c>  label
     BICS  Rd, Rm
@@ -28,7 +29,9 @@ Currently implemented instructions:
     LDRSB Rt, [Rn, Rm]
     LDRSH Rt, [Rn, Rm]
     LSLS  Rd, Rm, #imm5
+    LSLS  Rd, Rm
     LSRS  Rd, Rm, #imm5
+    LSRS  Rd, Rm
     MOV   Rd, Rm
     MOVS  Rd, #imm8
     MOVS  Rd, Rm

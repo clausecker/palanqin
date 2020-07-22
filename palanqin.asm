@@ -763,11 +763,21 @@ h0100000001:
 
 	; 0100000010BBBCCC LSLS Rdn, Rm
 h0100000010:
+	mov	cl, [si]	; CL = Rm
+	mov	si, di		; SI = DI = Rdn
+	jmp	lsl
+
 	; 0100000011BBBCCC LSRS Rdn, Rm
 h0100000011:
+	mov	cl, [si]	; CL = Rm
+	mov	si, di		; SI = DI = Rdn
+	jmp	lsr
+
 	; 0100000100BBBCCC ASRS Rdn, Rm
 h0100000100:
-	todo
+	mov	cl, [si]	; CL = Rm
+	mov	si, di		; SI = DI = Rdn
+	jmp	asr
 
 	; 0100000101BBBCCC ADCS Rdn, Rm
 h0100000101:
@@ -799,7 +809,9 @@ h0100000110:
 
 	; 0100000111BBBCCC RORS Rdn, Rm
 h0100000111:
-	todo
+	mov	cl, [si]	; CL = Rm
+	mov	si, di		; SI = DI = Rdn
+	jmp	ror
 
 	; 0100001000BBBCCC TST Rn, Rm
 h0100001000:
