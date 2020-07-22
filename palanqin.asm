@@ -384,7 +384,7 @@ dnone:	ret
 	align	2
 
 	; first level handler jump table: decode the top 4 instruction bits
-htXXXX:	dw	h000		; 000XX shift immediate
+htXXXX	dw	h000		; 000XX shift immediate
 	dw	h000		; 00011 add/subtract register/immediate
 	dw	h001		; 001XX add/subtract/compare/move immediate
 	dw	h001
@@ -405,33 +405,15 @@ htXXXX:	dw	h000		; 000XX shift immediate
 	dw	h1110		; 11100 B (unconditional branch)
 	dw	h1111		; 11110 branch and misc. control
 
-	; jump table for instructions 000XXX
-	; we decode the MSB of the immediate because shifting by 16 or more
-	; places requires different code than shifting by less
-ht000XXX:
-	dw	h000000		; LSL immediate (< 16)
-	dw	h000001		; LSL immediate (> 15)
-	dw	h000010		; LSR immediate (< 16)
-	dw	h000011		; LSR immediate (> 15)
-	dw	h000100		; ASR immediate (< 16)
-	dw	h000101		; ASR immediate (> 15)
-	dw	h000110		; ADD/SUB register
-	dw	h000111		; ADD/SUB immediate
-
-	; jump table for instructions 000XX where imm8 == 0
-	; this requires special treatment as some shifts treat a 0
-	; immediate as 32 while others treat it as 0.
-	; This table is interleaved with the jump table for
-	; add/subtract/compare/move immediate to save a shift.
-ht000XXz:
-	dw	h00000z		; MOVS Rd, Rm
-ht001XX:
-	dw	h00100		; MOVS Rd, #imm8
-	dw	h00001z		; LSRS Rd, Rm, #32
+	; Jump table for instructions 000XXX interleaved with the
+	; jump table for add/subtract/compare/move immediate.
+ht000XX	dw	lsl		; LSL Rd, Rm, #imm5
+ht001XX	dw	h00100		; MOVS Rd, #imm8
+	dw	lsr		; LSR Rd, Rm, #imm5
 	dw	h00101		; CMP  Rd, #imm8
-	dw	h00010z		; ASRS Rd, Rm, #32
+	dw	asr		; ASR Rd, Rm, #imm5
 	dw	h00110		; ADDS Rd, #imm8
-	dw	h000110		; ADDS Rd, Rm, R0
+	dw	h00011		; ADD/SUB register/immediate
 	dw	h00111		; SUBS Rd, #imm8
 
 	; jump table for data-processing register instructions
@@ -509,131 +491,35 @@ htBA	dw	hBA00		; REV Rd, Rm
 	; 00011XYAAABBBCCC add/subtract register/immediate
 h000:	mov	bl, ah		; BL = 000XXAAA
 	shr	bl, 1		; BL = 0000XXAA
-	and	bx, 0x0e	; BL = 0000XXA0
+	and	bx, 0x0c	; BL = 0000XX00
 	mov	si, [oprB]	; SI = &reglo[Rm]
 	mov	di, [oprC]	; DI = &reglo[Rd]
 	mov	[zsreg], di	; set SF and ZF according to Rd
-	mov	cx, [oprA]	; CL = imm5 (or Rm for 000110...)
-	test	cl, cl		; is imm8 == 0?
-	jz	.zero		; if yes, perform special handling
-	jmp	[ht000XXX+bx]	; call instruction specific handler
+	mov	cl, [oprA]	; CL = imm5 (or Rm for 000110...)
+	test	cl, cl		; if CL == 0 and it's not LSLS, adjust to 32
+	jz	.adj
+	jmp	[ht000XX+bx]	; call instruction specific handler
 
-.zero:	jmp	[ht000XXz+bx]	; call handler for imm8 = 0
+.adj:	test	bl, bl		; is this LSLS?
+	jz	h0000000000
+	mov	cl, 32		; otherwise adjust CL to 32
+	jmp	[ht000XX+bx]
 
 	; 0000000000BBBCCC MOVS Rd, Rm
-	; CV is preserved, NZ are set according to Rm
-h00000z:lodsw			; Rd(lo) = Rm(lo)
+h0000000000:
+	lodsw			; Rd = Rm
 	stosw
-	mov	ax, [si+hi-2]	; AX = Rm(hi)
-	mov	[di+hi-2], ax	; Rm(hi) = AX
-	ret
-
-	; 000000AAAABBBCCC LSLS Rd, Rm, #imm5 where 0 < imm5 < 16
-	; V must be preserved and CNZ set (whew)
-h000000:lodsw			; AX = Rm(lo)
-	mov	dx, ax		; keep a copy
-	shl	ax, cl		; AX = Rm(lo) << #imm5
-	stosw			; Rd(lo) = Rm(lo) << #imm5
-	mov	si, [si+hi-2]	; SI = Rm(hi)
-	shl	si, cl		; SI = Rm(hi) << #imm5
-	lahf			; update CF in flags
-	mov	[flags], ah
-	sub	cl, 16		; CL = 16 - CL
-	neg	cl
-	shr	dx, cl		; DX = Rm(lo) >> 16 - #imm5
-	or	si, dx		; SI = Rm(hi) << #imm5 | Rm(lo) >> 16 - #imm5
-	mov	[di+hi-2], si	; Rd(hi) = Rm << #imm5 (hi)
-	ret
-
-	; 000001AAAABBBCCC LSLS Rd, Rm, #imm5 where imm5 > 15
-h000001:sub	cl, 16		; CL = imm5 - 16
-	mov	al, [si+hi]	; AX = Rm(hi)
-	shr	al, 1		; if #imm5=16, CF must be set to Rm(hi) & 1
-	lodsw			; AX = Rm(lo),
-	shl	ax, cl		; AX = Rm(lo) << imm5 - 16
-	mov	word [di], 0	; Rd(lo) = 0
-	mov	[di+hi], ax	; Rd(hi) = Rm(lo) << imm5 - 16
-	lahf			; update CF in flags
-	mov	[flags], ah
-	ret
-
-	; 0000100000BBBCCC LSRS Rd, Rm, #32
-h00001z:mov	al, [si+hi+1]	; AL = Rm < 0 ? 0x80 : 0
-	rol	al, 1		; move AL sign bit to CF position
-	mov	[flags], al	; and deposit CF into flags
-	xor	ax, ax
-	stosw			; Rd = 0
+	mov	ax, [si+hi-2]
 	mov	[di+hi-2], ax
 	ret
 
-	; 000010AAAABBBCCC LSRS Rd, Rm, #imm5 where 0 < imm5 < 16
-h000010:mov	dx, [si]	; AX = Rm(lo)
-	shr	dx, cl		; AX = Rm(lo) >> #imm5
-	lahf			; update CF in flags
-	mov	[flags], ah
-	mov	ax, [si+hi]	; AX = Rm(hi)
-	mov	si, ax		; keep a copy
-	shr	si, cl		; SI = Rm(hi) >> #imm5
-	mov	[di+hi], si	; Rd(hi) = Rm(hi) >> #imm5
-	sub	cl, 16		; CL = 16 - CL
-	neg	cl
-	shl	ax, cl		; AX = Rm(hi) << 16 - #imm5
-	or	ax, dx		; AX = Rm(hi) << 16 - #imm5 | Rm(lo) >> #imm5
-	stosw			; Rd(lo) = Rm >> #imm5 (lo)
-	ret
-
-	; 000011AAAABBBCCC LSRS Rd, Rm, #imm5 where imm5 > 15
-h000011:sub	cl, 16		; CL = imm5 - 16
-	lodsw			; AL = Rm(lo)
-	shl	ax, 1		; if #imm5=16, CF must be set to Rm(lo)&0x8000
-	mov	ax, [si+hi-2]	; AX = Rm(hi)
-	shr	ax, cl		; AX = Rm(hi) >> imm5 - 16
-	mov	word [di+hi], 0	; Rd(hi) = 0
-	stosw			; Rd(lo) = Rm(hi) >> imm5 - 16
-	lahf			; update CF, SF, and ZF in flags
-	mov	[flags], ah
-	ret
-
-	; 0001000000BBBCCC ASRS Rd, Rm, #32
-h00010z:mov	ah, [si+hi+1]	; AH = Rm(hi) (high byte)
-	cwd			; DX = Rm < 0 ? -1 : 0
-	xchg	ax, dx		; move DX to AX for better encoding
-	mov	[flags], al	; set CF depending on DX
-	stosw			; store result to Rd
-	mov	[di+hi-2], ax
-	ret
-
-	; 000100AAAABBBCCC ASRS Rd, Rm, #imm5 where 0 < imm5 < 16
-h000100:mov	dx, [si]	; AX = Rm(lo)
-	shr	dx, cl		; AX = Rm(lo) >> #imm5
-	lahf			; update CF in flags
-	mov	[flags], ah
-	mov	ax, [si+hi]	; AX = Rm(hi)
-	mov	si, ax		; keep a copy
-	sar	si, cl		; SI = Rm(hi) >> #imm5
-	mov	[di+hi], si	; Rd(hi) = Rm(hi) >> #imm5
-	sub	cl, 16		; CL = 16 - CL
-	neg	cl
-	shl	ax, cl		; AX = Rm(hi) << 16 - #imm5
-	or	ax, dx		; AX = Rm(hi) << 16 - #imm5 | Rm(lo) >> #imm5
-	stosw			; Rd(lo) = Rm >> #imm5 (lo)
-	ret
-
-	; 000101AAAABBBCCC ASRS Rd, Rm, #imm5 where imm5 > 16
-h000101:sub	cl, 16		; CL = imm5 - 16
-	lodsw			; AX = Rm(lo)
-	shl	ax, 1		; if #imm5=16, CF must be set to Rm(lo)&0x8000
-	mov	ax, [si+hi-2]	; AX = Rm(hi)
-	sar	ax, cl		; AX = Rm(hi) >> imm5 - 16
-	cwd			; DX = Rm(hi) < 0 ? -1 : 0
-	mov	[di+hi], dx	; Rd(hi) = 0
-	stosw			; Rd(lo) = Rm(hi) >> imm5 - 16
-	mov	[flags], dl	; update CF in flags
-	ret
+	; 00011XXAAABBBCCC add/sub register/immediate
+h00011:	test	ah, 4		; is this register or immediate?
+	jnz	h000111
 
 	; 0001100AAABBBCCC ADDS Rd, Rn, Rm
 	; 0001101AAABBBCCC SUBS Rd, Rn, Rm
-h000110:mov	bx, cx		; need BX to form an address
+	mov	bx, cx		; need BX to form an address
 	mov	cx, [si]	; DX:CX = Rn
 	mov	dx, [si+hi]
 	test	ah, 2		; is this ADDS or SUBS?
