@@ -1317,6 +1317,141 @@ h1100:
 h1111:	todo
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Bit shifts and Rotates                                                     ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	; Shift register SI left logically by CL and store into register DI.
+	; Update CF in flags but not zsreg.  SI and DI may be the same register.
+lsl:	test	cl, cl		; no shift?
+	jz	.0
+	cmp	cl, 16		; shift by more than 16?
+	jbe	.lo
+	cmp	cl, 32		; shift by more than 32?
+	ja	.hi
+
+	; shift by 16 < CL <= 32
+	sub	cl, 16		; adjust shift amount to 0 < CL <= 16
+	lodsw			; AX = Rm(lo),
+	shl	ax, cl		; AX = Rm(lo) << imm5 - 16
+	mov	word [di], 0	; Rd(lo) = 0
+	mov	[di+hi], ax	; Rd(hi) = Rm(lo) << imm5 - 16
+	lahf			; update CF in flags
+	mov	[flags], ah
+	ret
+
+	; shift by 0 < CL <= 16
+.lo:	lodsw			; AX = Rm(lo)
+	mov	dx, ax		; keep a copy
+	shl	ax, cl		; AX = Rm(lo) << #imm5
+	stosw			; Rd(lo) = Rm(lo) << #imm5
+	mov	si, [si+hi-2]	; SI = Rm(hi)
+	shl	si, cl		; SI = Rm(hi) << #imm5
+	lahf			; update CF in flags
+	mov	[flags], ah
+	sub	cl, 16		; CL = 16 - CL
+	neg	cl
+	shr	dx, cl		; DX = Rm(lo) >> 16 - #imm5
+	or	si, dx		; SI = Rm(hi) << #imm5 | Rm(lo) >> 16 - #imm5
+	mov	[di+hi-2], si	; Rd(hi) = Rm << #imm5 (hi)
+	ret
+
+	; shift by 32 < CL
+.hi:	xor	ax, ax		; Rd = 0
+	stosw
+	mov	[di+hi-2], ax
+	mov	byte [flags], al ; clear CF in flags
+	ret
+
+.0:	lodsw			; Rd = Rm
+	stosw
+	mov	ax, [si+hi-2]
+	mov	[di+hi-2], dx
+	ret
+
+	; Shift register SI right logically by CL and store into register DI.
+	; Update CF in flags but not zsreg.  SI and DI may be the same register.
+lsr:	test	cl, cl		; no shift?
+	jz	lsl.0		; same as lsl by #0
+	cmp	cl, 16		; shift by more than 16?
+	jbe	.lo
+	cmp	cl, 32		; shift by more than 32?
+	ja	lsl.hi		; same as lsl by more than 32
+
+	; shift by 16 < CL <= 32
+	sub	cl, 16		; CL = imm5 - 16
+	mov	ax, [si+hi]	; AX = Rm(hi)
+	shr	ax, cl		; AX = Rm(hi) >> imm5 - 16
+	mov	word [di+hi], 0	; Rd(hi) = 0
+	stosw			; Rd(lo) = Rm(hi) >> imm5 - 16
+	lahf			; update CF, SF, and ZF in flags
+	mov	[flags], ah
+	ret
+
+	; shift by 0 < CL <= 16
+.lo:	mov	dx, [si]	; AX = Rm(lo)
+	shr	dx, cl		; AX = Rm(lo) >> #imm5
+	lahf			; update CF in flags
+	mov	[flags], ah
+	mov	ax, [si+hi]	; AX = Rm(hi)
+	mov	si, ax		; keep a copy
+	shr	si, cl		; SI = Rm(hi) >> #imm5
+	mov	[di+hi], si	; Rd(hi) = Rm(hi) >> #imm5
+	sub	cl, 16		; CL = 16 - CL
+	neg	cl
+	shl	ax, cl		; AX = Rm(hi) << 16 - #imm5
+	or	ax, dx		; AX = Rm(hi) << 16 - #imm5 | Rm(lo) >> #imm5
+	stosw			; Rd(lo) = Rm >> #imm5 (lo)
+	ret
+
+	; Shift SI right arithmetically by CL and store into DI.
+	; Update CF in flags but not zsreg.  SI and DI may be the same register.
+asr:	test	cl, cl		; no shift?
+	jz	lsl.0		; same as lsl by #0
+	cmp	cl, 16		; shift by more than 16?
+	jbe	.lo
+	cmp	cl, 32		; shift by 32 or more?
+	jae	.hi
+
+	; shift by 16 < CL < 32
+	sub	cl, 16		; CL = imm5 - 16
+	mov	ax, [si+hi]	; AX = Rm(hi)
+	sar	ax, cl		; AX = Rm(hi) >> imm5 - 16
+	cwd			; DX = Rm(hi) < 0 ? -1 : 0
+	mov	[di+hi], dx	; Rd(hi) = 0
+	stosw			; Rd(lo) = Rm(hi) >> imm5 - 16
+	mov	[flags], dl	; update CF in flags
+	ret
+
+	; shift by 0 < CL <= 16
+.lo:	mov	dx, [si]	; AX = Rm(lo)
+	shr	dx, cl		; AX = Rm(lo) >> #imm5
+	lahf			; update CF in flags
+	mov	[flags], ah
+	mov	ax, [si+hi]	; AX = Rm(hi)
+	mov	si, ax		; keep a copy
+	sar	si, cl		; SI = Rm(hi) >> #imm5
+	mov	[di+hi], si	; Rd(hi) = Rm(hi) >> #imm5
+	sub	cl, 16		; CL = 16 - CL
+	neg	cl
+	shl	ax, cl		; AX = Rm(hi) << 16 - #imm5
+	or	ax, dx		; AX = Rm(hi) << 16 - #imm5 | Rm(lo) >> #imm5
+	stosw			; Rd(lo) = Rm >> #imm5 (lo)
+	ret
+
+	; shift by 32 <= CL
+.hi:	mov	ah, [si+hi+1]	; AH = Rm(hi) (high byte)
+	cwd			; DX = Rm < 0 ? -1 : 0
+	xchg	ax, dx		; move DX to AX for better encoding
+	mov	[flags], al	; set CF depending on DX
+	stosw			; store result to Rd
+	mov	[di+hi-2], ax
+	ret
+
+	; Rotate SI right arithmetically by CL and store into DI.
+	; Update CF in flags but not zsreg.  SI and DI may be the same register.
+ror:	todo
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Flag Manipulation                                                          ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -1631,7 +1766,6 @@ strb:	call	translate	; DX:AX: translated address, BX: handler
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Address Space Conversion                                                   ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 
 	; convert DX:AX into a linear address in DX:AX
 	; trashes CX
