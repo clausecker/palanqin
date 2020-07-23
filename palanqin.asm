@@ -264,7 +264,7 @@ step:	call	ifetch		; fetch instruction
 	jmp	[htXXXX+bx]	; execute behaviour
 
 	section	.data
-	align	2
+	align	2, db 0
 
 	; decoder jump table: decode the operands according
 	; to the top 4 instruction bits
@@ -392,7 +392,7 @@ d0100:	test	ah, 0x08	; is this 01001...?
 dnone:	ret
 
 	section	.data
-	align	2
+	align	2, db 0
 
 	; first level handler jump table: decode the top 4 instruction bits
 htXXXX	dw	h000		; 000XX shift immediate
