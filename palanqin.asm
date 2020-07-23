@@ -418,11 +418,11 @@ htXXXX	dw	h000		; 000XX shift immediate
 
 	; Jump table for instructions 000XXX interleaved with the
 	; jump table for add/subtract/compare/move immediate.
-ht000XX	dw	lsl.nz		; LSL Rd, Rm, #imm5
+ht000XX	dw	h00000		; LSLS Rd, Rm, #imm5
 ht001XX	dw	h00100		; MOVS Rd, #imm8
-	dw	lsr.nz		; LSR Rd, Rm, #imm5
+	dw	h00001		; LSR Rd, Rm, #imm5
 	dw	h00101		; CMP  Rd, #imm8
-	dw	asr.nz		; ASR Rd, Rm, #imm5
+	dw	h00010		; ASR Rd, Rm, #imm5
 	dw	h00110		; ADDS Rd, #imm8
 	dw	h00011		; ADD/SUB register/immediate
 	dw	h00111		; SUBS Rd, #imm8
@@ -661,20 +661,135 @@ h0100000001:
 	; 0100000010BBBCCC LSLS Rdn, Rm
 h0100000010:
 	mov	cl, [si]	; CL = Rm
+	test	cl, cl		; no shift?
+	jz	h00000.ret
+	cmp	cl, 32		; shift by more than 32?
+	ja	h00000.hi
 	mov	si, di		; SI = DI = Rdn
-	jmp	lsl
+	; fallthrough
+
+	; 00000AAAAABBBCCC LSLS Rd, Rm, #imm5
+h00000:	cmp	cl, 16		; shift by more than 16?
+	jbe	.lo
+
+	; shift by 16 < CL <= 32
+	sub	cl, 16		; adjust shift amount to 0 < CL <= 16
+	lodsw			; AX = Rm(lo),
+	shl	ax, cl		; AX = Rm(lo) << imm5 - 16
+	mov	word [di], 0	; Rd(lo) = 0
+	mov	[di+hi], ax	; Rd(hi) = Rm(lo) << imm5 - 16
+	lahf			; update CF in flags
+	mov	[bp+flags], ah
+.ret:	ret
+
+	; shift by 0 < CL <= 16
+.lo:	lodsw			; AX = Rm(lo)
+	mov	dx, ax		; keep a copy
+	shl	ax, cl		; AX = Rm(lo) << #imm5
+	stosw			; Rd(lo) = Rm(lo) << #imm5
+	mov	si, [si+hi-2]	; SI = Rm(hi)
+	shl	si, cl		; SI = Rm(hi) << #imm5
+	lahf			; update CF in flags
+	mov	[bp+flags], ah
+	sub	cl, 16		; CL = 16 - CL
+	neg	cl
+	shr	dx, cl		; DX = Rm(lo) >> 16 - #imm5
+	or	si, dx		; SI = Rm(hi) << #imm5 | Rm(lo) >> 16 - #imm5
+	mov	[di+hi-2], si	; Rd(hi) = Rm << #imm5 (hi)
+	ret
+
+	; shift by 32 < CL
+.hi:	xor	ax, ax		; Rd = 0
+	stosw
+	mov	[di+hi-2], ax
+	mov	byte [bp+flags], al ; clear CF in flags
+	ret
 
 	; 0100000011BBBCCC LSRS Rdn, Rm
 h0100000011:
 	mov	cl, [si]	; CL = Rm
+	test	cl, cl		; no shift?
+	jz	h00001.ret
+	cmp	cl, 32		; shift by more than 32?
+	ja	h00000.hi	; same as lsl by more than 32
 	mov	si, di		; SI = DI = Rdn
-	jmp	lsr
+
+	; 00001AAAAABBBCCC LSRS Rd, Rm, #imm5
+h00001:	cmp	cl, 16		; shift by more than 16?
+	jbe	.lo
+
+	; shift by 16 < CL <= 32
+	sub	cl, 16		; CL = imm5 - 16
+	mov	ax, [si+hi]	; AX = Rm(hi)
+	shr	ax, cl		; AX = Rm(hi) >> imm5 - 16
+	mov	word [di+hi], 0	; Rd(hi) = 0
+	stosw			; Rd(lo) = Rm(hi) >> imm5 - 16
+	lahf			; update CF, SF, and ZF in flags
+	mov	[bp+flags], ah
+.ret:	ret
+
+	; shift by 0 < CL <= 16
+.lo:	mov	dx, [si]	; AX = Rm(lo)
+	shr	dx, cl		; AX = Rm(lo) >> #imm5
+	lahf			; update CF in flags
+	mov	[bp+flags], ah
+	mov	ax, [si+hi]	; AX = Rm(hi)
+	mov	si, ax		; keep a copy
+	shr	si, cl		; SI = Rm(hi) >> #imm5
+	mov	[di+hi], si	; Rd(hi) = Rm(hi) >> #imm5
+	sub	cl, 16		; CL = 16 - CL
+	neg	cl
+	shl	ax, cl		; AX = Rm(hi) << 16 - #imm5
+	or	ax, dx		; AX = Rm(hi) << 16 - #imm5 | Rm(lo) >> #imm5
+	stosw			; Rd(lo) = Rm >> #imm5 (lo)
+	ret
 
 	; 0100000100BBBCCC ASRS Rdn, Rm
 h0100000100:
 	mov	cl, [si]	; CL = Rm
+	test	cl, cl		; shift by 0?
+	jz	h00010.ret
+	cmp	cl, 32		; shift by 32 or more?
+	jae	h00010.hi
 	mov	si, di		; SI = DI = Rdn
-	jmp	asr
+
+	; 00010AAAAABBBCCC ASRS Rd, Rm, #imm5
+h00010:	cmp	cl, 16		; shift by more than 16?
+	jbe	.lo
+
+	; shift by 16 < CL < 32
+	sub	cl, 16		; CL = imm5 - 16
+	mov	ax, [si+hi]	; AX = Rm(hi)
+	sar	ax, cl		; AX = Rm(hi) >> imm5 - 16
+	cwd			; DX = Rm(hi) < 0 ? -1 : 0
+	mov	[di+hi], dx	; Rd(hi) = 0
+	stosw			; Rd(lo) = Rm(hi) >> imm5 - 16
+	mov	[bp+flags], dl	; update CF in flags
+.ret:	ret
+
+	; shift by 0 < CL <= 16
+.lo:	mov	dx, [si]	; AX = Rm(lo)
+	shr	dx, cl		; AX = Rm(lo) >> #imm5
+	lahf			; update CF in flags
+	mov	[bp+flags], ah
+	mov	ax, [si+hi]	; AX = Rm(hi)
+	mov	si, ax		; keep a copy
+	sar	si, cl		; SI = Rm(hi) >> #imm5
+	mov	[di+hi], si	; Rd(hi) = Rm(hi) >> #imm5
+	sub	cl, 16		; CL = 16 - CL
+	neg	cl
+	shl	ax, cl		; AX = Rm(hi) << 16 - #imm5
+	or	ax, dx		; AX = Rm(hi) << 16 - #imm5 | Rm(lo) >> #imm5
+	stosw			; Rd(lo) = Rm >> #imm5 (lo)
+	ret
+
+	; shift by 32 <= CL
+.hi:	mov	ah, [si+hi+1]	; AH = Rm(hi) (high byte)
+	cwd			; DX = Rm < 0 ? -1 : 0
+	mov	[bp+flags], dl	; set CF depending on DX
+	mov	[di], dx	; store result to Rd
+	mov	[di+hi], dx
+	ret
 
 	; 0100000101BBBCCC ADCS Rdn, Rm
 h0100000101:
@@ -705,8 +820,32 @@ h0100000110:
 	; 0100000111BBBCCC RORS Rdn, Rm
 h0100000111:
 	mov	cl, [si]	; CL = Rm
-	mov	si, di		; SI = DI = Rdn
-	jmp	ror
+	test	cl, cl		; no rotate?
+	jz	.ret
+	mov	ax, [di]	; DX:AX = Rdn
+	mov	dx, [di+hi]
+	and	cl, 31		; mask out useless extra rotates
+	cmp	cl, 16		; rotating by 16 or more?
+	jb	.lo
+	sub	cl, 16		; if yes, reduce to rotation to 0 <= cl < 16
+	xchg	ax, dx		; with a pre-rotate by 16
+
+	; rotate by 0 <= CL < 16
+.lo:	shr	ax, cl		; AX = Rdn(lo) >> CL
+	mov	bx, ax		; SI:BX = Rdn
+	mov	si, dx
+	shr	dx, cl		; DX = Rdn(hi) >> CL
+	sub	cl, 16		; CL = 16 - CL
+	neg	cl
+	shl	bx, cl		; BX = Rdn(lo) << 16 - CL
+	or	dx, bx		; DX = Rdn(hi) >> CL | Rdn(lo) << 16 - CL
+	mov	[di+hi], dx	; Rdn(hi) = Rdn ror CL (hi)
+	shl	si, cl		; SI = Rdn(hi) << 16 - CL
+	or	ax, si		; AX = Rdn(lo) >> CL | Rdn(hi) << 16 - CL
+	stosw			; Rdn(lo) = Rdn ror CL (lo)
+	rol	dh, 1		; shift Rdn sign bit into LSB of DH
+	mov	[bp+flags], dh	; and deposit into flags as CF
+.ret:	ret
 
 	; 0100001000BBBCCC TST Rn, Rm
 h0100001000:
@@ -1221,161 +1360,6 @@ h1110:	test	ah, 0x08	; is this B #imm11?
 	; instruction handlers that have not been implemented yet
 h1100:
 h1111:	todo
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Bit shifts and Rotates                                                     ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-	; Shift register SI left logically by CL and store into register DI.
-	; Update CF in flags but not zsreg.  SI and DI may be the same register.
-	; if CL = 0, perform no operation.
-lsl:	test	cl, cl		; no shift?
-	jz	.ret
-.nz:	cmp	cl, 16		; shift by more than 16?
-	jbe	.lo
-	cmp	cl, 32		; shift by more than 32?
-	ja	.hi
-
-	; shift by 16 < CL <= 32
-	sub	cl, 16		; adjust shift amount to 0 < CL <= 16
-	lodsw			; AX = Rm(lo),
-	shl	ax, cl		; AX = Rm(lo) << imm5 - 16
-	mov	word [di], 0	; Rd(lo) = 0
-	mov	[di+hi], ax	; Rd(hi) = Rm(lo) << imm5 - 16
-	lahf			; update CF in flags
-	mov	[bp+flags], ah
-.ret:	ret
-
-	; shift by 0 < CL <= 16
-.lo:	lodsw			; AX = Rm(lo)
-	mov	dx, ax		; keep a copy
-	shl	ax, cl		; AX = Rm(lo) << #imm5
-	stosw			; Rd(lo) = Rm(lo) << #imm5
-	mov	si, [si+hi-2]	; SI = Rm(hi)
-	shl	si, cl		; SI = Rm(hi) << #imm5
-	lahf			; update CF in flags
-	mov	[bp+flags], ah
-	sub	cl, 16		; CL = 16 - CL
-	neg	cl
-	shr	dx, cl		; DX = Rm(lo) >> 16 - #imm5
-	or	si, dx		; SI = Rm(hi) << #imm5 | Rm(lo) >> 16 - #imm5
-	mov	[di+hi-2], si	; Rd(hi) = Rm << #imm5 (hi)
-	ret
-
-	; shift by 32 < CL
-.hi:	xor	ax, ax		; Rd = 0
-	stosw
-	mov	[di+hi-2], ax
-	mov	byte [bp+flags], al ; clear CF in flags
-	ret
-
-	; Shift register SI right logically by CL and store into register DI.
-	; Update CF in flags but not zsreg.  SI and DI may be the same register.
-	; if CL = 0, perform no operation.
-lsr:	test	cl, cl		; no shift?
-	jz	.ret
-.nz:	cmp	cl, 16		; shift by more than 16?
-	jbe	.lo
-	cmp	cl, 32		; shift by more than 32?
-	ja	lsl.hi		; same as lsl by more than 32
-
-	; shift by 16 < CL <= 32
-	sub	cl, 16		; CL = imm5 - 16
-	mov	ax, [si+hi]	; AX = Rm(hi)
-	shr	ax, cl		; AX = Rm(hi) >> imm5 - 16
-	mov	word [di+hi], 0	; Rd(hi) = 0
-	stosw			; Rd(lo) = Rm(hi) >> imm5 - 16
-	lahf			; update CF, SF, and ZF in flags
-	mov	[bp+flags], ah
-.ret:	ret
-
-	; shift by 0 < CL <= 16
-.lo:	mov	dx, [si]	; AX = Rm(lo)
-	shr	dx, cl		; AX = Rm(lo) >> #imm5
-	lahf			; update CF in flags
-	mov	[bp+flags], ah
-	mov	ax, [si+hi]	; AX = Rm(hi)
-	mov	si, ax		; keep a copy
-	shr	si, cl		; SI = Rm(hi) >> #imm5
-	mov	[di+hi], si	; Rd(hi) = Rm(hi) >> #imm5
-	sub	cl, 16		; CL = 16 - CL
-	neg	cl
-	shl	ax, cl		; AX = Rm(hi) << 16 - #imm5
-	or	ax, dx		; AX = Rm(hi) << 16 - #imm5 | Rm(lo) >> #imm5
-	stosw			; Rd(lo) = Rm >> #imm5 (lo)
-	ret
-
-	; Shift SI right arithmetically by CL and store into DI.
-	; Update CF in flags but not zsreg.  SI and DI may be the same register.
-asr:	test	cl, cl		; shift by 0?
-	jz	.ret
-.nz:	cmp	cl, 16		; shift by more than 16?
-	jbe	.lo
-	cmp	cl, 32		; shift by 32 or more?
-	jae	.hi
-
-	; shift by 16 < CL < 32
-	sub	cl, 16		; CL = imm5 - 16
-	mov	ax, [si+hi]	; AX = Rm(hi)
-	sar	ax, cl		; AX = Rm(hi) >> imm5 - 16
-	cwd			; DX = Rm(hi) < 0 ? -1 : 0
-	mov	[di+hi], dx	; Rd(hi) = 0
-	stosw			; Rd(lo) = Rm(hi) >> imm5 - 16
-	mov	[bp+flags], dl	; update CF in flags
-.ret:	ret
-
-	; shift by 0 < CL <= 16
-.lo:	mov	dx, [si]	; AX = Rm(lo)
-	shr	dx, cl		; AX = Rm(lo) >> #imm5
-	lahf			; update CF in flags
-	mov	[bp+flags], ah
-	mov	ax, [si+hi]	; AX = Rm(hi)
-	mov	si, ax		; keep a copy
-	sar	si, cl		; SI = Rm(hi) >> #imm5
-	mov	[di+hi], si	; Rd(hi) = Rm(hi) >> #imm5
-	sub	cl, 16		; CL = 16 - CL
-	neg	cl
-	shl	ax, cl		; AX = Rm(hi) << 16 - #imm5
-	or	ax, dx		; AX = Rm(hi) << 16 - #imm5 | Rm(lo) >> #imm5
-	stosw			; Rd(lo) = Rm >> #imm5 (lo)
-	ret
-
-	; shift by 32 <= CL
-.hi:	mov	ah, [si+hi+1]	; AH = Rm(hi) (high byte)
-	cwd			; DX = Rm < 0 ? -1 : 0
-	mov	[bp+flags], dl	; set CF depending on DX
-	mov	[di], dx	; store result to Rd
-	mov	[di+hi], dx
-	ret
-
-	; Rotate SI right arithmetically by CL and store into DI.
-	; Update CF in flags but not zsreg.  SI and DI may be the same register.
-ror:	test	cl, cl		; no rotate?
-	jz	.ret
-	lodsw			; DX:AX = Rm
-	mov	dx, [si+hi-2]
-	and	cl, 31		; mask out useless extra rotates
-	cmp	cl, 16		; rotating by 16 or more?
-	jb	.lo
-	sub	cl, 16		; if yes, reduce to rotation by 0 <= cl < 16
-	xchg	ax, dx		; by pre-rotating by 16
-
-	; rotate by 0 <= CL < 16
-.lo:	shr	ax, cl		; AX = Rm(lo) >> CL
-	mov	bx, ax		; SI:BX = Rm
-	mov	si, dx
-	shr	dx, cl		; DX = Rm(hi) >> CL
-	sub	cl, 16		; CL = 16 - CL
-	neg	cl
-	shl	bx, cl		; BX = Rm(lo) << 16 - CL
-	or	dx, bx		; DX = Rm(hi) >> CL | Rm(lo) << 16 - CL
-	mov	[di+hi], dx	; Rd(hi) = Rm ror CL (hi)
-	shl	si, cl		; SI = Rm(hi) << 16 - CL
-	or	ax, si		; AX = Rm(lo) >> CL | Rm(hi) << 16 - CL
-	stosw			; Rd(lo) = Rm ror CL (lo)
-	rol	dh, 1		; shift Rd sign bit into LSB of DH
-	mov	[bp+flags], dh	; and deposit into flags as CF
-.ret:	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Flag Manipulation                                                          ;;
