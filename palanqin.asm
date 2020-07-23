@@ -21,22 +21,27 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 ;; Macros and Constants                                                       ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+	; low and high registers.
+	; no parentheses so we can use segment overrides if desired
+%define	rlo(r)	[r*2+bp+reglo]
+%define	rhi(r)	[r*2+bp+reghi]
+
 	; load value into ARM register
 %macro	ldrlo	2
-	mov	[%1*2+bp+reglo], %2
+	mov	rlo(%1), %2
 %endmacro
 
 %macro	ldrhi	2
-	mov	[%1*2+bp+reghi], %2
+	mov	rhi(%1), %2
 %endmacro
 
 	; store value of ARM register
 %macro	strlo	2
-	mov	%1, [%2*2+bp+reglo]
+	mov	%1, rlo(%2)
 %endmacro
 
 %macro	strhi	2
-	mov	%1, [%2*2+bp+reghi]
+	mov	%1, rhi(%2)
 %endmacro
 
 	; functionality not implemented
@@ -225,11 +230,11 @@ state	resb	st_size		; BP points here
 	section	.text
 	; load one instruction into AX and advance PC past it.
 	; trashes BX, CX, and SI.
-ifetch:	mov	ax, [bp+reglo+2*15] ; DX:AX = PC
-	mov	dx, [bx+reghi+2*15]
+ifetch:	strlo	ax, 15		; DX:AX = PC
+	strhi	dx, 15
 	and	al, ~1		; clear thumb bit
-	add	word [bp+reglo+2*15], 2	; PC += 2
-	adc	word [bx+reghi+2*15], 0
+	add	word rlo(15), 2	; PC += 2
+	adc	word rhi(15), 0
 	call	translate	; BX: handler, DX:AX: address
 	xchg	ax, si		; CX:SI = DX:AX
 	mov	cx, dx
@@ -896,8 +901,8 @@ h1001:	xchg	ax, cx		; CX = instruction
 	shl	ax, 1		; AX = #imm8 << 2
 	shl	ax, 1
 	xor	dx, dx
-	add	ax, [bp+reglo+2*13] ; DX:AX = SP + #imm8
-	adc	dx, [bp+reghi+2*13]
+	add	ax, rlo(13)	; DX:AX = SP + #imm8
+	adc	dx, rhi(13)
 	test	ch, 0x08	; is this LDR?
 	jz	.str		; otherwise it is STR
 	jmp	ldr
@@ -911,8 +916,8 @@ h1010:	mov	di, [bp+oprB]	; di = &Rd
 	call	fixRd		; fix up flags to Rd if needed
 	mov	ax, 2		; DX:AX = 2
 	cwd
-	add	ax, [bp+reglo+2*15] ; DX:AX = R15 + 2
-	adc	dx, [bp+reghi+2*15]
+	add	ax, rlo(15)	; DX:AX = R15 + 2
+	adc	dx, rhi(15)
 	and	al, ~3		; aligned to word boundary
 	jmp	.fi
 .sp:	call	fixRd		; fix up flags to Rd if needed
@@ -941,12 +946,12 @@ h10110000:
 	shl	al, 1		; AX = 00000000AAAAAAA0, CF = ADD/SUB
 	jc	.sub
 	shl	ax, 1		; AX = #imm7 (in words)
-	add	[bp+reglo+2*13], ax ; R13 += #imm7
-	adc	word [bp+reghi+2*13], 0
+	add	rlo(13), ax	; R13 += #imm7
+	adc	word rhi(13), 0
 	ret
 .sub:	shl	ax, 1		; AX = #imm7 (in words)
-	sub	[bp+reglo+2*13], ax ; R13 += #imm7
-	sbb	word [bp+reghi+2*13], 0
+	sub	rlo(13), ax	; R13 += #imm7
+	sbb	word rhi(13), 0
 	ret
 
 h10110100:
@@ -1189,10 +1194,9 @@ h1101xxxx:
 	inc	ax		; AX = #imm8 + 1
 	shl	ax, 1		; AX = #imm8:0 + 2
 	cwd			; DX:AX = #imm8 + 2
-	add	[bp+reglo+2*15], ax ; R15 += #imm8 + 2 + 2
-				; note that R15 had already been advanced by two
+	add	rlo(15), ax	; R15 += #imm8 + 2 + 2
+	adc	rhi(15), dx	; note that R15 had already been advanced by two
 				; in the initial ifetch call.
-	adc	[bp+reghi+2*15], dx
 	ret
 
 .svc:	todo			; todo
@@ -1208,8 +1212,8 @@ h1110:	test	ah, 0x08	; is this B #imm11?
 	inc	ax		; AX = #imm11 + 2
 	inc	ax
 	cwd			; DX:AX = #imm11 + 2
-	add	[bp+reglo+2*15], ax ; R15 += #imm11 + 2
-	adc	[bp+reghi+2*15], dx
+	add	rlo(15), ax	; R15 += #imm11 + 2
+	adc	rhi(15), dx
 	ret
 .32bit:	todo
 
@@ -1766,7 +1770,7 @@ hB702:	strlo	dl, 0		; AL = R0(lo)
 	ret
 
 	; b703 console input (no echo)
-hB703:	lea	di, [bp+reglo+2*0] ; di = &R0
+hB703:	lea	di, rlo(0)	; di = &R0
 	mov	word [di+hi], 0	; R0(hi) = 0
 	mov	ah, 0x08
 	int	0x21		; 0x08: NO ECHO CONSOLE INPUT
