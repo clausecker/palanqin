@@ -407,11 +407,11 @@ htXXXX	dw	h000		; 000XX shift immediate
 
 	; Jump table for instructions 000XXX interleaved with the
 	; jump table for add/subtract/compare/move immediate.
-ht000XX	dw	lsl		; LSL Rd, Rm, #imm5
+ht000XX	dw	lsl.nz		; LSL Rd, Rm, #imm5
 ht001XX	dw	h00100		; MOVS Rd, #imm8
-	dw	lsr		; LSR Rd, Rm, #imm5
+	dw	lsr.nz		; LSR Rd, Rm, #imm5
 	dw	h00101		; CMP  Rd, #imm8
-	dw	asr		; ASR Rd, Rm, #imm5
+	dw	asr.nz		; ASR Rd, Rm, #imm5
 	dw	h00110		; ADDS Rd, #imm8
 	dw	h00011		; ADD/SUB register/immediate
 	dw	h00111		; SUBS Rd, #imm8
@@ -1222,7 +1222,7 @@ h1111:	todo
 	; Update CF in flags but not zsreg.  SI and DI may be the same register.
 lsl:	test	cl, cl		; no shift?
 	jz	.0
-	cmp	cl, 16		; shift by more than 16?
+.nz:	cmp	cl, 16		; shift by more than 16?
 	jbe	.lo
 	cmp	cl, 32		; shift by more than 32?
 	ja	.hi
@@ -1270,7 +1270,7 @@ lsl:	test	cl, cl		; no shift?
 	; Update CF in flags but not zsreg.  SI and DI may be the same register.
 lsr:	test	cl, cl		; no shift?
 	jz	lsl.0		; same as lsl by #0
-	cmp	cl, 16		; shift by more than 16?
+.nz:	cmp	cl, 16		; shift by more than 16?
 	jbe	.lo
 	cmp	cl, 32		; shift by more than 32?
 	ja	lsl.hi		; same as lsl by more than 32
@@ -1305,7 +1305,7 @@ lsr:	test	cl, cl		; no shift?
 	; Update CF in flags but not zsreg.  SI and DI may be the same register.
 asr:	test	cl, cl		; no shift?
 	jz	lsl.0		; same as lsl by #0
-	cmp	cl, 16		; shift by more than 16?
+.nz:	cmp	cl, 16		; shift by more than 16?
 	jbe	.lo
 	cmp	cl, 32		; shift by 32 or more?
 	jae	.hi
