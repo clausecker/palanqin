@@ -173,17 +173,17 @@ start:	mov	sp, end+stack	; beginning of stack
 	mov	ds, bx		; load DS with emulated address space
 	xor	si, si		; vector table begin
 	lodsw			; load initial SP, low half
-	ldrlo	cs:13, ax
+	ldrlo	13, ax
 	lodsw			; load initial SP, high half
-	ldrhi	cs:13, ax
+	ldrhi	13, ax
 	lodsw			; load initial PC (reset vector), low half
-	ldrlo	cs:15, ax
+	ldrlo	15, ax
 	lodsw			; load initial PC (reset vector), high half
-	ldrhi	cs:15, ax
+	ldrhi	15, ax
 
 	call	run		; emulate a Cortex M0
 
-	strlo	al, cs:0	; load error level from R0
+	strlo	al, 0		; load error level from R0
 	mov	ah, 0x4c
 	int	0x21		; 0x4c: TERMINATE PROGRAM
 
@@ -1507,7 +1507,7 @@ memnone	times	6 dw ldstnone
 	; load word from memory
 	section	.text
 ldrmem:	push	ds		; remember old DS
-	mov	ds, cx		; set up DS for CS:SI memory load
+	mov	ds, cx		; set up DS for DS:SI memory load
 	mov	ax, [si]	; DX:AX = [CX:SI]
 	mov	dx, [si+2]
 	pop	ds		; restore DS
@@ -1515,21 +1515,21 @@ ldrmem:	push	ds		; remember old DS
 
 	; load half word from memory
 ldrhmem:mov	dx, ds		; remember old DS
-	mov	ds, cx		; set up DS for CS:SI memory load
+	mov	ds, cx		; set up DS for DS:SI memory load
 	mov	ax, [si]	; AX = [CX:SI]
 	mov	ds, dx		; restore DS
 	ret
 
 	; load byte from memory
 ldrbmem:mov	dx, ds		; remember old DS
-	mov	ds, cx		; set up DS for CS:SI memory load
+	mov	ds, cx		; set up DS for DS:SI memory load
 	mov	al, [si]	; AL = [CX:SI]
 	mov	ds, dx		; restore DS
 	ret
 
 	; store word to memory
 strmem:	push	ds		; remember old DS
-	mov	ds, cx		; set up DS for CS:SI store
+	mov	ds, cx		; set up DS for DS:SI store
 	mov	[si], ax	; [CX:SI] = AX:DX
 	mov	[si+2], dx
 	pop	ds
@@ -1537,14 +1537,14 @@ strmem:	push	ds		; remember old DS
 
 	; store half word to memory
 strhmem:mov	dx, ds		; remember old DS
-	mov	ds, cx		; set up DS for CS:SI store
+	mov	ds, cx		; set up DS for DS:SI store
 	mov	[si], ax	; [CX:SI] = AX
 	mov	ds, dx		; restore old DS
 	ret
 
 	; store byte to memory
 strbmem:mov	dx, ds		; remember old DS
-	mov	ds, cx		; set up DS for CS:SI store
+	mov	ds, cx		; set up DS for DS:SI store
 	mov	[si], al	; [CX:SI] = AL
 	mov	ds, dx		; restore old DS
 	ret
@@ -1645,7 +1645,7 @@ ldrsb:	call	translate	; DX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = DX:AX
 	mov	cx, dx
 	call	[bx+mem.ldrb]	; AL = mem[CX:SI]
-	cbw			; AX = mem[CS:SI]
+	cbw			; AX = mem[CX:SI]
 	cwd			; DX:AX = mem[CX:SI]
 	stosw			; Rt = mem[CX:SI] (sign extended)
 	mov	[di+hi-2], dx
