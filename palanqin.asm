@@ -518,8 +518,7 @@ h000:	mov	bl, ah		; BL = 000XXAAA
 
 	; 0000000000BBBCCC MOVS Rd, Rm
 h0000000000:
-	lodsw			; Rd = Rm
-	stosw
+	movsw			; Rd = Rm
 	mov	ax, [si+hi-2]
 	mov	[di+hi-2], ax
 	ret
@@ -962,8 +961,7 @@ h01000100:
 
 	; MOV Rd, Rm
 h01000110:
-	lodsw			; Rd = Rm
-	stosw
+	movsw			; Rd = Rm
 	mov	ax, [si+hi-2]
 	mov	[di+hi-2], ax
 	ret
