@@ -1199,6 +1199,7 @@ h1101xxxx:
 				; in the initial ifetch call.
 	ret
 
+	; 11011111XXXXXXXX SVC #imm8
 .svc:	todo			; todo
 
 	; 11100CCCCCCCCCCC B #imm11
@@ -1227,8 +1228,9 @@ h1111:	todo
 
 	; Shift register SI left logically by CL and store into register DI.
 	; Update CF in flags but not zsreg.  SI and DI may be the same register.
+	; if CL = 0, perform no operation.
 lsl:	test	cl, cl		; no shift?
-	jz	.0
+	jz	.ret
 .nz:	cmp	cl, 16		; shift by more than 16?
 	jbe	.lo
 	cmp	cl, 32		; shift by more than 32?
@@ -1242,7 +1244,7 @@ lsl:	test	cl, cl		; no shift?
 	mov	[di+hi], ax	; Rd(hi) = Rm(lo) << imm5 - 16
 	lahf			; update CF in flags
 	mov	[bp+flags], ah
-	ret
+.ret:	ret
 
 	; shift by 0 < CL <= 16
 .lo:	lodsw			; AX = Rm(lo)
@@ -1267,16 +1269,11 @@ lsl:	test	cl, cl		; no shift?
 	mov	byte [bp+flags], al ; clear CF in flags
 	ret
 
-.0:	lodsw			; Rd = Rm
-	stosw
-	mov	ax, [si+hi-2]
-	mov	[di+hi-2], dx
-	ret
-
 	; Shift register SI right logically by CL and store into register DI.
 	; Update CF in flags but not zsreg.  SI and DI may be the same register.
+	; if CL = 0, perform no operation.
 lsr:	test	cl, cl		; no shift?
-	jz	lsl.0		; same as lsl by #0
+	jz	.ret
 .nz:	cmp	cl, 16		; shift by more than 16?
 	jbe	.lo
 	cmp	cl, 32		; shift by more than 32?
@@ -1290,7 +1287,7 @@ lsr:	test	cl, cl		; no shift?
 	stosw			; Rd(lo) = Rm(hi) >> imm5 - 16
 	lahf			; update CF, SF, and ZF in flags
 	mov	[bp+flags], ah
-	ret
+.ret:	ret
 
 	; shift by 0 < CL <= 16
 .lo:	mov	dx, [si]	; AX = Rm(lo)
@@ -1310,8 +1307,8 @@ lsr:	test	cl, cl		; no shift?
 
 	; Shift SI right arithmetically by CL and store into DI.
 	; Update CF in flags but not zsreg.  SI and DI may be the same register.
-asr:	test	cl, cl		; no shift?
-	jz	lsl.0		; same as lsl by #0
+asr:	test	cl, cl		; shift by 0?
+	jz	.ret
 .nz:	cmp	cl, 16		; shift by more than 16?
 	jbe	.lo
 	cmp	cl, 32		; shift by 32 or more?
@@ -1325,7 +1322,7 @@ asr:	test	cl, cl		; no shift?
 	mov	[di+hi], dx	; Rd(hi) = 0
 	stosw			; Rd(lo) = Rm(hi) >> imm5 - 16
 	mov	[bp+flags], dl	; update CF in flags
-	ret
+.ret:	ret
 
 	; shift by 0 < CL <= 16
 .lo:	mov	dx, [si]	; AX = Rm(lo)
@@ -1346,15 +1343,39 @@ asr:	test	cl, cl		; no shift?
 	; shift by 32 <= CL
 .hi:	mov	ah, [si+hi+1]	; AH = Rm(hi) (high byte)
 	cwd			; DX = Rm < 0 ? -1 : 0
-	xchg	ax, dx		; move DX to AX for better encoding
-	mov	[bp+flags], al	; set CF depending on DX
-	stosw			; store result to Rd
-	mov	[di+hi-2], ax
+	mov	[bp+flags], dl	; set CF depending on DX
+	mov	[di], dx	; store result to Rd
+	mov	[di+hi], dx
 	ret
 
 	; Rotate SI right arithmetically by CL and store into DI.
 	; Update CF in flags but not zsreg.  SI and DI may be the same register.
-ror:	todo
+ror:	test	cl, cl		; no rotate?
+	jz	.ret
+	lodsw			; DX:AX = Rm
+	mov	dx, [si+hi-2]
+	and	cl, 31		; mask out useless extra rotates
+	cmp	cl, 16		; rotating by 16 or more?
+	jb	.lo
+	sub	cl, 16		; if yes, reduce to rotation by 0 <= cl < 16
+	xchg	ax, dx		; by pre-rotating by 16
+
+	; rotate by 0 <= CL < 16
+.lo:	shr	ax, cl		; AX = Rm(lo) >> CL
+	mov	bx, ax		; SI:BX = Rm
+	mov	si, dx
+	shr	dx, cl		; DX = Rm(hi) >> CL
+	sub	cl, 16		; CL = 16 - CL
+	neg	cl
+	shl	bx, cl		; BX = Rm(lo) << 16 - CL
+	or	dx, bx		; DX = Rm(hi) >> CL | Rm(lo) << 16 - CL
+	mov	[di+hi], dx	; Rd(hi) = Rm ror CL (hi)
+	shl	si, cl		; SI = Rm(hi) << 16 - CL
+	or	ax, si		; AX = Rm(lo) >> CL | Rm(hi) << 16 - CL
+	stosw			; Rd(lo) = Rm ror CL (lo)
+	rol	dh, 1		; shift Rd sign bit into LSB of DH
+	mov	[bp+flags], dh	; and deposit into flags as CF
+.ret:	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Flag Manipulation                                                          ;;

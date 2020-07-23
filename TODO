@@ -42,6 +42,7 @@ Currently implemented instructions:
     REV   Rd, Rm
     REV16 Rd, Rm
     REVSH Rd, Rm
+    RORS  Rd, Rm
     RSBS  Rd, Rm, #0
     SEV
     SBCS  Rd, Rm
