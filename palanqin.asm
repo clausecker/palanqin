@@ -715,7 +715,7 @@ h0100001000:
 	or	al, ~ZF		; isolate ZF in AL
 	and	ah, al		; AH = SF, ZF according to Rm(lo) & Rn(lo)
 	mov	al, [bp+flags]
-	and	ax, (ZF|SF)<<8|~(ZF|SF)
+	and	ax, (ZF|SF)<<8|~(ZF|SF)&0xff
 				; mask AL to all but ZF and SF,
 				; AH to just ZF and SF
 	or	al, ah		; merge the two
@@ -1372,7 +1372,7 @@ fixflags:
 	or	al, ~ZF		; isolate ZF in AL
 	and	ah, al		; AH = SF, ZF according to R
 	mov	al, [bp+flags]
-	and	ax, (ZF|SF)<<8|~(ZF|SF)
+	and	ax, (ZF|SF)<<8|~(ZF|SF)&0xff
 				; mask AL to all but ZF and SF,
 				; AH to just ZF and SF
 	or	al, ah		; merge the two
