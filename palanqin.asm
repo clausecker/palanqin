@@ -1347,7 +1347,7 @@ h1101xxxx:
 	; 11100CCCCCCCCCCC B #imm11
 	; 11101XXXXXXXXXXX 32-bit instructions
 h1110:	test	ah, 0x08	; is this B #imm11?
-	jnz	.32bit		; or is it a 32 bit instruction?
+	jnz	.udf		; or is it a 32 bit instruction?
 	mov	cl, 5		; sign extend #imm11 into AX
 	shl	ax, cl		; AX=CCCCCCCCCCC00000
 	dec	cx		; keep #imm11 as a word offset
@@ -1358,11 +1358,55 @@ h1110:	test	ah, 0x08	; is this B #imm11?
 	add	rlo(15), ax	; R15 += #imm11 + 2
 	adc	rhi(15), dx
 	ret
-.32bit:	todo
+.udf:	jmp	undefined	; 11101XXXXXXXXXXX is undefined
+
+	; 32 bit instructions
+	; 11110011100XAAAA 10X0XXXXBBBBBBBB MSR spec_reg, Rn
+	; 1111001111XXXXXX 10X0AAAABBBBBBBB MRS Rn, spec_reg
+	; 111100111011XXXX 10X0XXXX0100AAAA DSB #option
+	; 111100111011XXXX 10X0XXXX0101AAAA DMB #option
+	; 111100111011XXXX 10X0XXXX0110AAAA ISB #option
+	; 111101111111AAAA 1010AAAAAAAAAAAA UDF #imm16
+h1111:	test	ah, 0x08	; is this 11111XXXXXXXXXXX?
+	jnz	h1110.udf	; if yes, execute as undefined.
+	push	ax		; remember low instruction word
+	call	ifetch		; fetch high instruction word into AX
+	pop	dx		; AX:DX holds the instruction
+	test	ax, ax		; is AX 0XXXXXXXXXXXXXXX?
+	jns	.udf		; if yes, execute as undefined.
+	mov	cl, ah
+	and	cl, 0x50	; mask high word to 0X0X00000000
+	jz	.notbl		; for the case X0X0XXXXXXXX
+	jpo	.udf		; if it was not X1X1XXXXXXXX
+	; fallthrough to BL #imm24
+
+	; 11110SBBBBBBBBBB 11J1JAAAAAAAAAAA BL #imm24
+	mov	cl, 4
+	shl	dx, cl		; DX = 0SBBBBBBBBBB0000
+	mov	bx, ax		; keep a copy of BX for later
+	shl	bx, 1		; BX = 1J1JAAAAAAAAAAA0
+	and	bh, 0x0f	; BX = 0000AAAAAAAAAAA0
+	or	bh, dl		; BX = BBBBAAAAAAAAAAA0
+	shl	dx, 1		; DX = SBBBBBBBBBB00000
+	mov	cl, 9
+	shr	dx, cl		; DX = SSSSSSSSSSBBBBBB
+	test	ah, 0x10	; is J1 set?
+	jnz	.j1
+	xor	dl, 0x40	; DX = SSSSSSSSSyBBBBBB
+.j1:	test	ah, 0x20	; is J2 set?
+	jnz	.j2
+	xor	dl, 0x80	; DX = SSSSSSSSxyBBBBBB, xy = ~SS^JJ
+.j2:	add	rlo(15), bx	; PC += #imm24:0
+	adc	rhi(15), dx
+	ret
+
+.udf:	sub	word rlo(15), 2	; move PC back to current instruction + 2
+	sbb	word rhi(15), 0
+	jmp	undefined	; and treat as an undefined instruction
+.notbl:	todo
 
 	; instruction handlers that have not been implemented yet
-h1100:
-h1111:	todo
+h1100:	todo
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Flag Manipulation                                                          ;;
