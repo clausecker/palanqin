@@ -23,9 +23,11 @@ _start:	ldr	r0, =0x6c6c6548	@ 'Hell'
 	emit
 
 	ldr	r0, =0x21646c72	@ 'rld!'
-	emit
 	str	r0, [sp, #0]
 	mov	r1, sp
+	movs	r0, '?'
+	ldr	r0, [sp, #0]
+	emit
 	ldrb	r0, [r1, #1]
 	emit
 	ldrh	r0, [r1, #2]
