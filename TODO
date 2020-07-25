@@ -14,6 +14,8 @@ Currently implemented instructions:
     B     label
     B<c>  label
     BICS  Rd, Rm
+    BLX   Rm
+    BX    Rm
     CMN   Rn, Rm
     CMP   Rn, #imm8
     CMP   Rn, Rm

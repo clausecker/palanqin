@@ -968,9 +968,25 @@ h01000100:
 	adc	[di+hi], ax	; Rd(hi) += Rm(hi) + C
 	ret
 
-	; BX Rm
+	; 010001110BBBXXX BX Rm
+	; 010001111BBBXXX BLX Rm
 h01000111:
-	todo
+	test	al, 0x40	; is this BLX?
+	jz	.bx
+	xchg	ax, si		; save Rm for later
+	lea	si, rlo(15)	; SI = &PC
+	lea	di, rlo(14)	; DI = &LR
+	movsw			; LR = PC
+	movsw
+	xchg	ax, si		; restore SI
+.bx:	lea	di, rlo(15)	; DI = &PC
+	lodsw			; PC = Rm
+	test	al, 1		; trying to leave thumb state?
+	jnz	.arm
+	stosw
+	movsw
+	ret
+.arm:	jmp	undefined
 
 	; 0101XXXAAABBBCCC load/store register offset
 h0101:	mov	bl, ah		; BL = 0101XXXA
