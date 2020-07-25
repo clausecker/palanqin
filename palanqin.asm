@@ -23,8 +23,8 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 
 	; low and high registers.
 	; no parentheses so we can use segment overrides if desired
-%define	rlo(r)	[r*2+bp+regs]
-%define	rhi(r)	[r*2+bp+regs+hi]
+%define	rlo(r)	[r*4+bp+regs]
+%define	rhi(r)	[r*4+bp+regs+hi]
 
 	; load value into ARM register
 %macro	ldrlo	2
@@ -312,7 +312,7 @@ imm5rr:	mov	cx, ax		; CX = XXXX XAAA AABB BCCC
 	add	ax, si		; AX = &regs[C]
 	stosw			; oprC = &regs[C]
 	shr	cx, 1		; AX = 0XXX XXAA AAAB BBCC
-	mov	cx, ax
+	mov	ax, cx
 	and	ax, dx		; AX = 0000 0000 000B BB00
 	add	ax, si		; AX == &regs[B]
 	stosw			; oprB = &regs[B]
@@ -372,7 +372,8 @@ d0100:	test	ah, 0x08	; is this 01001...?
 	; note how the C operand is split in two!
 	mov	cx, ax		; CX = 0100 01XX CBBB BCCC
 	shl	ax, 1		; AX = XXXX XXXC BBBB CCC0
-	and	ax, dx		; AX = 0000 0000 0000 CCC0
+	shl	ax, 1		; AX = XXXX XXCB BBBC CC00
+	and	ax, dx		; AX = 0000 0000 000C CC00
 	shr	cx, 1		; CX = 0010 001X XCBB BBCC
 	mov	dx, cx		; make a copy for masking
 	shr	dx, 1		; DX = 0001 0001 XXCB BBBC
