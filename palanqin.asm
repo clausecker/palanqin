@@ -23,8 +23,8 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 
 	; low and high registers.
 	; no parentheses so we can use segment overrides if desired
-%define	rlo(r)	[r*2+bp+reglo]
-%define	rhi(r)	[r*2+bp+reghi]
+%define	rlo(r)	[r*2+bp+regs]
+%define	rhi(r)	[r*2+bp+regs+hi]
 
 	; load value into ARM register
 %macro	ldrlo	2
@@ -172,14 +172,12 @@ start:	mov	sp, end+stack	; beginning of stack
 	; initial register set up: stack pointer and reset vector
 	mov	ds, bx		; load DS with emulated address space
 	xor	si, si		; vector table begin
-	lodsw			; load initial SP, low half
-	ldrlo	13, ax
-	lodsw			; load initial SP, high half
-	ldrhi	13, ax
-	lodsw			; load initial PC (reset vector), low half
-	ldrlo	15, ax
-	lodsw			; load initial PC (reset vector), high half
-	ldrhi	15, ax
+	lea	di, rlo(13)	; DI = &SP
+	movsw			; load initial SP, low half
+	movsw			; load initial SP, high half
+	add	di, 4		; advance past LR
+	movsw			; load initial PC (reset vector), low half
+	movsw			; load initial PC (reset vector), high half
 
 	call	run		; emulate a Cortex M0
 
@@ -200,20 +198,19 @@ file	resw	1		; image file name
 
 	; the emulator state structure
 	struc	st
-reglo	resw	16		; ARM registers, low  hwords
-reghi	resw	16		; ARM registers, high hwords
-hi	equ	reghi-reglo	; to turn a reglo pointer into a reghi pointer
+regs	resd	16		; ARM registers
+hi	equ	2		; to turn a reglo pointer into a reghi pointer
 imgbase	resw	1		; emulator image base segment
 flags	resw	1		; CPU flags in 8086 format
 				; only CF, ZF, SF, and OF are meaningful
-zsreg	resw	1		; pointer to reglo according to which the zero
-				; and sign flags shall be set or 0 if they are
-				; already set up correctly.  This is never R15.
+zsreg	resw	1		; pointer to the register according to which the
+				; zero and sign flags shall be set or 0 if they
+				; are already set up correctly.  This is R0--R7.
 
 	; instruction decoding state variables
 	; immediate operands are zero/sign-extended to 16 bit
 	; register operands are represented by a pointer to the appropriate
-	; reglo array member
+	; regs array member
 oprC	resw	1		; third operand (towards least significant bit)
 oprB	resw	1		; second operand (middle of the instruction)
 oprA	resw	1		; first operand (towards most significant bit)
@@ -255,8 +252,8 @@ step:	call	ifetch		; fetch instruction
 	mov	cl, 5		; mask out the instruction's top 4 bits
 	rol	bx, cl		; and form a table offset
 	and	bx, 0x1e	; bx = ([insn] & 0xf000) >> (16 - 4) << 1
-	mov	dx, 0x0e	; mask for use with the decode handlers
-	lea	si, [bp+reglo]	; for use with the decode handlers
+	mov	dx, 0x1c	; mask for use with the decode handlers
+	lea	si, [bp+regs]	; for use with the decode handlers
 	lea	di, [bp+oprC]	; for use with the decode handlers
 				; which also assume that AX=insn
 	call	[dtXXXX+bx]	; decode operands
@@ -308,21 +305,21 @@ d0001:	mov	cx, ax		; make a copy of insn
 	; for d000, we don't treat the 00011 opcodes specially;
 	; the handler for these instructions must manually decode the
 	; register from oprA
-imm5rr:	mov	cx, ax		; keep a copy of insn for later
-	shl	ax, 1		; form an offset into the register table
-	and	ax, dx		; mask out operand C
-	add	ax, si		; form a pointer to reglo[C]
-	stosw			; oprC = &reglo[C]
-	mov	ax, cx
-	shr	ax, 1
-	shr	ax, 1
-	and	ax, dx		; mask out operand B
-	add	ax, si
-	stosw			; oprB = &reglo[B]
-	xchg	ax, cx		; free CX for use with shr
-	mov	cl, 6		; prepare shift amount
-	shr	ax, cl		; shift immediate into place
-	and	ax, 0x1f	; and mask it out
+imm5rr:	mov	cx, ax		; CX = XXXX XAAA AABB BCCC
+	shl	ax, 1		; AX = XXXX AAAA ABBB CCC0
+	shl	ax, 1		; AX = XXXA AAAA BBBC CC00
+	and	ax, dx		; AX = 0000 0000 000C CC00
+	add	ax, si		; AX = &regs[C]
+	stosw			; oprC = &regs[C]
+	shr	cx, 1		; AX = 0XXX XXAA AAAB BBCC
+	mov	cx, ax
+	and	ax, dx		; AX = 0000 0000 000B BB00
+	add	ax, si		; AX == &regs[B]
+	stosw			; oprB = &regs[B]
+	xchg	ax, cx		; AX = 0XXX XXAA AAAB BBCC
+	mov	cl, 5		; prepare shift amount
+	shr	ax, cl		; AX = 0000 00XX XXXA AAAA
+	and	ax, 0x1f	; AX = 0000 0000 000A AAAA
 	stosw			; oprA = A
 	ret
 
@@ -334,29 +331,31 @@ rimm8:	xor	cx, cx
 	stosw			; oprC=imm8
 	xchg	ax, cx		; AX=reg
 	shl	ax, 1		; AX = XXXX XXXX XXXX BBB0
-	and	ax, dx		; AX = 0000 0000 0000 BBB0
-	add	ax, si		; form a pointer to reglo[B]
-	stosw			; oprB = &reglo[B]
+	shl	ax, 1		; AX = XXXX XXXX XXXB BB00
+	and	ax, dx		; AX = 0000 0000 000B BB00
+	add	ax, si		; AX = &regs[B]
+	stosw			; oprB = &regs[B]
 	ret
 
 	; decode handler for reg / reg / reg
 	; instruction layout: XXXXXXXAAABBBCCC
-rrr:	mov	cx, ax		; keep a copy of insn for later
-	shl	ax, 1		; form an offset into the register table
-	and	ax, dx		; mask out operand C
-	add	ax, si		; form a pointer to reglo[C]
+rrr:	mov	cx, ax		; CX = XXXX XXXA AABB BCCC
+	shl	ax, 1		; CX = XXXX XXAA ABBB CCC0
+	shl	ax, 1		; CX = XXXX XAAA BBBC CC00
+	and	ax, dx		; CX = 0000 0000 000C CC00
+	add	ax, si		; AX = &regs[C]
 	stosw			; oprC = &reglo[C]
 	mov	ax, cx
-	shr	ax, 1
-	shr	ax, 1
-	and	ax, dx		; mask out operand B
-	add	ax, si
-	stosw			; oprB = &reglo[B]
-	xchg	ax, cx		; free CX for use with shr
-	mov	cl, 5		; prepare shift amount
-	shr	ax, cl		; shift operand A into place
-	and	ax, dx		; and mask it out
-	add	ax, si
+	shr	ax, 1		; CX = 0XXX XXXX AAAB BBCC
+	mov	cx, ax
+	and	ax, dx		; CX = 0000 0000 000B BB00
+	add	ax, si		; CX = &regs[B]
+	stosw			; oprB = &regs[B]
+	xchg	ax, cx
+	mov	cl, 3		; prepare shift amount
+	shr	ax, cl		; CX = 0000 XXXX 000A AABB
+	and	ax, dx		; CX = 0000 0000 000A AA00
+	add	ax, si		; CX = &reglo[A]
 	stosw			; oprA = &reglo[A]
 	ret
 
@@ -371,21 +370,20 @@ d0100:	test	ah, 0x08	; is this 01001...?
 
 	; if we get here, we have instruction 0100 01XX CBBB BCCC
 	; note how the C operand is split in two!
-	mov	cx, ax		; keep a copy of insn for later
+	mov	cx, ax		; CX = 0100 01XX CBBB BCCC
 	shl	ax, 1		; AX = XXXX XXXC BBBB CCC0
 	and	ax, dx		; AX = 0000 0000 0000 CCC0
-	shr	cx, 1
-	shr	cx, 1		; CX = 00XX XXXX XXCB BBB0
+	shr	cx, 1		; CX = 0010 001X XCBB BBCC
 	mov	dx, cx		; make a copy for masking
-	shr	dx, 1		; DX = 000X XXXX XXXC BBBB
-	and	dx, 0x10	; DX = 0000 0000 000C 0000
-	or	ax, dx		; AX = 0000 0000 000C CCC0
-	add	ax, si
-	stosw			; oprC = &reglo[C]
+	shr	dx, 1		; DX = 0001 0001 XXCB BBBC
+	and	dx, 0x20	; DX = 0000 0000 00C0 0000
+	or	ax, dx		; AX = 0000 0000 00CC CC00
+	add	ax, si		; AX = &regs[C]
+	stosw			; oprC = &regs[C]
 	xchg	cx, ax
-	and	ax, 0x1e	; AX = 0000 0000 000B BBB0
-	add	ax, si
-	stosw			; oprB = &reglo[B]
+	and	ax, 0x3c	; AX = 0000 0000 00BB BB00
+	add	ax, si		; AX = &regs[B]
+	stosw			; oprB = &regs[B]
 	; fallthrough
 
 	; decode handlers that perform no decoding
@@ -485,13 +483,12 @@ ht1011XXXX:
 	dw	h10111111	; (IT), hints
 
 	; jump table for (un)signed byte/halfword extend
-htB2	dw	hB200		; SXTH Rd, Rm
+	; and jump table for reverse bytes
+htB2BA	dw	hB200		; SXTH Rd, Rm
 	dw	hB201		; SXTB Rd, Rm
 	dw	hB210		; UXTH Rd, Rm
 	dw	hB211		; UXTB Rd, Rm
-
-	; jump table for reverse bytes
-htBA	dw	hBA00		; REV Rd, Rm
+	dw	hBA00		; REV Rd, Rm
 	dw	hBA01		; undefined
 	dw	hBA10		; REV16 Rd, Rm
 	dw	hBA11		; REVSH Rd, Rm
@@ -506,8 +503,9 @@ h000:	mov	bl, ah		; BL = 000XXAAA
 	mov	si, [bp+oprB]	; SI = &reglo[Rm]
 	mov	di, [bp+oprC]	; DI = &reglo[Rd]
 	mov	[bp+zsreg], di	; set SF and ZF according to Rd
-	mov	cl, [bp+oprA]	; CL = imm5 (or Rm for 000110...)
-	test	cl, cl		; if CL == 0 and it's not LSLS, adjust to 32
+	mov	cx, [bp+oprA]	; CL = imm5 (or Rm for 000110...)
+	test	cx, cx		; if CL == 0 and it's not LSLS, adjust to 32
+				; for ADDS/SUBS, CX is a reg and is never 0.
 	jz	.adj
 	jmp	[ht000XX+bx]	; call instruction specific handler
 
@@ -517,10 +515,11 @@ h000:	mov	bl, ah		; BL = 000XXAAA
 	jmp	[ht000XX+bx]
 
 	; 0000000000BBBCCC MOVS Rd, Rm
+	; 01000110CBBBBCCC MOV Rd, Rm
 h0000000000:
+h01000110:
 	movsw			; Rd = Rm
-	mov	ax, [si+hi-2]
-	mov	[di+hi-2], ax
+	movsw
 	ret
 
 	; 00011XXAAABBBCCC add/sub register/immediate
@@ -555,13 +554,15 @@ h000111:and	cx, 7		; CX = #imm3
 	add	cx, [si]	; AX:CX = Rn + #imm3
 	adc	ax, [si+hi]
 	jmp	.fi
-.subs:	mov	dx, [si]	; AX:DX = Rn
-	mov	ax, [si+hi]
+.subs:	lodsw			; AX:DX = Rn
+	xchg	ax, dx
+	lodsw
 	sub	dx, cx		; AX:DX = Rn - #imm3
 	sbb	ax, 0
 	cmc			; adjust CF to ARM conventions
-.fi:	mov	[di], dx	; Rd = AX:DX
-	mov	[di+hi], ax
+.fi:	xchg	ax, dx		; DX:AX = AX:DX
+	stosw			; Rd = DX:AX
+	mov	[di], dx
 	pushf			; remember all flags
 	pop	word [bp+flags]
 	ret
@@ -578,7 +579,7 @@ h001:	mov	bl, ah		; BL = 001XXAAA
 
 	; 00100BBBCCCCCCCC MOVS Rd, #imm8
 h00100:	stosw			; Rd = #imm8
-	mov	[di+hi-2], si
+	mov	[di], si
 	ret
 
 	; 00101BBBCCCCCCCC CMP Rn, #imm8
@@ -645,7 +646,7 @@ h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 h0100000000:
 	lodsw			; AX = Rm(lo)
 	and	[di], ax	; Rdn(lo) &= Rm(lo)
-	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	lodsw			; AX = Rm(hi)
 	and	[di+hi], ax	; Rdn(hi) &= Rm(hi)
 	ret
 
@@ -653,7 +654,7 @@ h0100000000:
 h0100000001:
 	lodsw			; AX = Rm(lo)
 	xor	[di], ax	; Rdn(lo) ^= Rm(lo)
-	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	lodsw			; AX = Rm(hi)
 	xor	[di+hi], ax	; Rdn(hi) ^= Rm(hi)
 	ret
 
@@ -683,24 +684,24 @@ h00000:	cmp	cl, 16		; shift by more than 16?
 
 	; shift by 0 < CL <= 16
 .lo:	lodsw			; AX = Rm(lo)
-	mov	dx, ax		; keep a copy
+	mov	bx, ax		; keep a copy
 	shl	ax, cl		; AX = Rm(lo) << #imm5
 	stosw			; Rd(lo) = Rm(lo) << #imm5
-	mov	si, [si+hi-2]	; SI = Rm(hi)
+	mov	si, [si]	; SI = Rm(hi)
 	shl	si, cl		; SI = Rm(hi) << #imm5
 	lahf			; update CF in flags
 	mov	[bp+flags], ah
 	sub	cl, 16		; CL = 16 - CL
 	neg	cl
-	shr	dx, cl		; DX = Rm(lo) >> 16 - #imm5
-	or	si, dx		; SI = Rm(hi) << #imm5 | Rm(lo) >> 16 - #imm5
-	mov	[di+hi-2], si	; Rd(hi) = Rm << #imm5 (hi)
+	shr	bx, cl		; BX = Rm(lo) >> 16 - #imm5
+	lea	ax, [bx+si]	; AX = Rm(hi) << #imm5 | Rm(lo) >> 16 - #imm5
+	stosw			; Rd(hi) = Rm << #imm5 (hi)
 	ret
 
 	; shift by 32 < CL
 .hi:	xor	ax, ax		; Rd = 0
 	stosw
-	mov	[di+hi-2], ax
+	stosw
 	mov	byte [bp+flags], al ; clear CF in flags
 	ret
 
@@ -721,18 +722,19 @@ h00001:	cmp	cl, 16		; shift by more than 16?
 	sub	cl, 16		; CL = imm5 - 16
 	mov	ax, [si+hi]	; AX = Rm(hi)
 	shr	ax, cl		; AX = Rm(hi) >> imm5 - 16
-	mov	word [di+hi], 0	; Rd(hi) = 0
 	stosw			; Rd(lo) = Rm(hi) >> imm5 - 16
+	mov	word [di], 0	; Rd(hi) = 0
 	lahf			; update CF, SF, and ZF in flags
 	mov	[bp+flags], ah
 .ret:	ret
 
 	; shift by 0 < CL <= 16
-.lo:	mov	dx, [si]	; AX = Rm(lo)
-	shr	dx, cl		; AX = Rm(lo) >> #imm5
+.lo:	lodsw			; DX = Rm(lo)
+	xchg	ax, dx
+	shr	dx, cl		; DX = Rm(lo) >> #imm5
 	lahf			; update CF in flags
 	mov	[bp+flags], ah
-	mov	ax, [si+hi]	; AX = Rm(hi)
+	lodsw			; AX = Rm(hi)
 	mov	si, ax		; keep a copy
 	shr	si, cl		; SI = Rm(hi) >> #imm5
 	mov	[di+hi], si	; Rd(hi) = Rm(hi) >> #imm5
@@ -761,17 +763,19 @@ h00010:	cmp	cl, 16		; shift by more than 16?
 	mov	ax, [si+hi]	; AX = Rm(hi)
 	sar	ax, cl		; AX = Rm(hi) >> imm5 - 16
 	cwd			; DX = Rm(hi) < 0 ? -1 : 0
-	mov	[di+hi], dx	; Rd(hi) = 0
-	stosw			; Rd(lo) = Rm(hi) >> imm5 - 16
+	stosw			; Rd = DX:AX
+	xchg	ax, dx
+	stosw
 	mov	[bp+flags], dl	; update CF in flags
 .ret:	ret
 
 	; shift by 0 < CL <= 16
-.lo:	mov	dx, [si]	; AX = Rm(lo)
-	shr	dx, cl		; AX = Rm(lo) >> #imm5
+.lo:	lodsw			; DX = Rm(lo)
+	xchg	ax, dx
+	shr	dx, cl		; DX = Rm(lo) >> #imm5
 	lahf			; update CF in flags
 	mov	[bp+flags], ah
-	mov	ax, [si+hi]	; AX = Rm(hi)
+	lodsw			; AX = Rm(hi)
 	mov	si, ax		; keep a copy
 	sar	si, cl		; SI = Rm(hi) >> #imm5
 	mov	[di+hi], si	; Rd(hi) = Rm(hi) >> #imm5
@@ -786,8 +790,9 @@ h00010:	cmp	cl, 16		; shift by more than 16?
 .hi:	mov	ah, [si+hi+1]	; AH = Rm(hi) (high byte)
 	cwd			; DX = Rm < 0 ? -1 : 0
 	mov	[bp+flags], dl	; set CF depending on DX
-	mov	[di], dx	; store result to Rd
-	mov	[di+hi], dx
+	xchg	ax, dx		; Rd = DX:DX
+	stosw
+	stosw
 	ret
 
 	; 0100000101BBBCCC ADCS Rdn, Rm
@@ -796,7 +801,7 @@ h0100000101:
 	sahf
 	lodsw			; AX = Rm(lo)
 	adc	[di], ax	; Rdn(lo) += Rm(lo) + CF
-	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	lodsw			; AX = Rm(hi)
 	adc	[di+hi], ax	; Rdn(hi) += Rm(hi) + CF
 	pushf			; remember CF and OF in flags
 	pop	word [bp+flags]
@@ -809,7 +814,7 @@ h0100000110:
 	cmc			; adapt CF from ARM conventions
 	lodsw
 	sbb	[di], ax	; Rdn(lo) -= Rm(lo) - 1 + CF
-	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	lodsw			; AX = Rm(hi)
 	sbb	[di+hi], ax	; Rdn(hi) += Rm(hi) + CF
 	cmc			; adjust CF to ARM conventions
 	pushf			; remember CF and OF in flags
@@ -830,26 +835,26 @@ h0100000111:
 	xchg	ax, dx		; with a pre-rotate by 16
 
 	; rotate by 0 <= CL < 16
-.lo:	shr	ax, cl		; AX = Rdn(lo) >> CL
-	mov	bx, ax		; SI:BX = Rdn
-	mov	si, dx
-	shr	dx, cl		; DX = Rdn(hi) >> CL
+.lo:	mov	bx, ax		; BX = Rdn(lo)
+	shr	ax, cl		; AX = Rdn(lo) >> CL
+	mov	si, dx		; SI = Rdn(hi)
+	shr	si, cl		; DX = Rdn(hi) >> CL
 	sub	cl, 16		; CL = 16 - CL
 	neg	cl
-	shl	bx, cl		; BX = Rdn(lo) << 16 - CL
-	or	dx, bx		; DX = Rdn(hi) >> CL | Rdn(lo) << 16 - CL
-	mov	[di+hi], dx	; Rdn(hi) = Rdn ror CL (hi)
-	shl	si, cl		; SI = Rdn(hi) << 16 - CL
-	or	ax, si		; AX = Rdn(lo) >> CL | Rdn(hi) << 16 - CL
+	shl	dx, cl		; DX = Rdn(hi) << 16 - CL
+	or	ax, dx		; AX = Rdn(lo) >> CL | Rdn(hi) << 16 - CL
 	stosw			; Rdn(lo) = Rdn ror CL (lo)
-	rol	dh, 1		; shift Rdn sign bit into LSB of DH
-	mov	[bp+flags], dh	; and deposit into flags as CF
+	shl	bx, cl		; BX = Rdn(lo) << 16 - CL
+	lea	ax, [bx+si]	; AX = Rdn(hi) >> CL | Rdn(lo) << 16 - CL
+	stosw			; Rdn(hi) = Rdn ror CL (hi)
+	rol	ah, 1		; shift Rdn sign bit into LSB of AH
+	mov	[bp+flags], ah	; and deposit into flags as CF
 .ret:	ret
 
 	; 0100001000BBBCCC TST Rn, Rm
 h0100001000:
 	lodsw			; DX:AX = Rm
-	mov	dx, [si+hi-2]
+	mov	dx, [si]
 	test	[di], ax	; set ZF according to Rm(lo) & Rn(lo)
 	lahf
 	mov	al, ah		; AL = Rm(lo) & Rn(lo) flags
@@ -869,12 +874,14 @@ h0100001000:
 	; 0100001001BBBCCC RSBS Rd, Rm, #0
 	; CF = Rn == 0
 h0100001001:
-	xor	ax, ax		; DX:AX = 0
+	lodsw			; AX = Rm(lo)
 	xor	dx, dx
-	sub	ax, [si]	; DX:AX = -Rn
-	sbb	dx, [si+hi]
+	neg	ax		; AX = -AX
+	stosw
+	sbb	ax, ax		; AX = Rm(lo) == 0 ? -1 : 0
+	sub	ax, [si]	; AX = -Rm(hi) - carry
 	stosw			; Rd = DX:AX
-	mov	[di+hi-2], dx
+	cmc			; adjust CF to ARM conventions
 	lahf			; remember CF in flags
 	mov	[bp+flags], ah
 	ret
@@ -887,7 +894,7 @@ h0100001010:
 	mov	dx, [di+hi]	; DX = Rn(hi)
 	cmp	[di], ax	; set flags according to Rn(lo) - Rm(lo)
 	lahf			; and remember ZF in AH
-	sbb	dx, [si+hi-2]	; set CF, SF, and OF according to Rn - Rm
+	sbb	dx, [si]	; set CF, SF, and OF according to Rn - Rm
 	cmc			; adapt CF to ARM conventions
 .flags:	pushf			; load flags into DX
 	pop	dx
@@ -899,18 +906,18 @@ h0100001010:
 
 	; 0100001011BBBCCC CMN Rn, Rm
 h0100001011:
-	lodsw			; DX:AX = Rm
-	mov	dx, [si+hi-2]
+	lodsw			; AX = Rm(lo)
 	add	ax, [di]	; set flags according to Rn(lo) + Rm(lo)
 	lahf			; and remember ZF in AH
-	adc	dx, [di+hi]	; set CF, SF, and OF according to Rn - Rm
+	lodsw			; AX = Rm(hi)
+	adc	ax, [di+hi]	; set CF, SF, and OF according to Rn - Rm
 	jmp	h0100001010.flags ; rest is the same as with CMP Rn, Rm
 
 	; 0100001100BBBCCC ORRS Rd, Rm
 h0100001100:
 	lodsw			; AX = Rm(lo)
 	or	[di], ax	; Rdn(lo) |= Rm(lo)
-	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	lodsw			; AX = Rm(hi)
 	or	[di+hi], ax	; Rdn(hi) |= Rm(hi)
 	ret
 
@@ -923,11 +930,12 @@ h0100001101:
 	xchg	bx, ax		; BX = Rm * Rd (lo), AX = Rm(lo)
 	mul	word [di+hi]	; AX = Rm(lo) * Rd(hi) (lo), DX = junk
 	add	cx, ax		; CX = Rm(lo)*Rd(lo) (hi) + Rm(lo)*Rd(hi) (lo)
-	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	lodsw			; AX = Rm(hi)
 	mul	word [di]	; AX = Rm(hi)*Rd(lo), DX = junk
 	add	cx, ax		; AX = Rm * Rd (hi)
-	mov	[di], bx	; Rd = CX:BX
-	mov	[di+hi], CX
+	xchg	ax, bx		; Rd = CX:BX
+	stosw
+	mov	[di], cx
 	ret
 
 	; 0100001110BBBCCC BICS Rd, Rm
@@ -935,7 +943,7 @@ h0100001110:
 	lodsw			; AX = Rm(lo)
 	not	ax		; AX = ~Rm(lo)
 	and	[di], ax	; Rdn(lo) |= Rm(lo)
-	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	lodsw			; AX = Rm(hi)
 	not	ax		; AX = ~Rm(hi)
 	and	[di+hi], ax	; Rdn(hi) |= Rm(hi)
 	ret
@@ -946,24 +954,17 @@ h0100001111:
 	lodsw			; AX = Rm(lo)
 	not	ax		; AX = ~Rm(lo)
 	stosw			; Rd(lo) = ~Rm(lo)
-	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	lodsw			; AX = Rm(hi)
 	not	ax		; AX = ~Rm(hi)
-	mov	[di+hi-2], ax	; Rd(hI) = ~Rm(hi)
+	stosw			; Rd(hi) = ~Rm(hi)
 	ret
 
 	; ADD Rd, Rm
 h01000100:
 	lodsw			; AX = Rm(lo)
 	add	[di], ax	; Rd(lo) += Rm(lo)
-	mov	ax, [si+hi-2]	; AX = Rm(hi)
+	lodsw			; AX = Rm(hi)
 	adc	[di+hi], ax	; Rd(hi) += Rm(hi) + C
-	ret
-
-	; MOV Rd, Rm
-h01000110:
-	movsw			; Rd = Rm
-	mov	ax, [si+hi-2]
-	mov	[di+hi-2], ax
 	ret
 
 	; BX Rm
@@ -977,7 +978,7 @@ h0101:	mov	bl, ah		; BL = 0101XXXA
 	call	fixRd		; fix flags for Rt
 	mov	si, [bp+oprB]	; SI = &Rn
 	lodsw			; DX:AX = Rn
-	mov	dx, [si+hi-2]
+	mov	dx, [si]
 	mov	si, [bp+oprA]	; SI = &rm
 	add	ax, [si]	; DX:AX = Rn + Rm
 	adc	dx, [si+hi]
@@ -993,7 +994,7 @@ h011:	xchg	ax, cx		; CX = instruction
 	call	fixRd		; fix flags on Rt
 	mov	bx, [bp+oprA]	; BX = #imm5
 	lodsw			; DX:AX = Rn
-	mov	dx, [si+hi-2]
+	mov	dx, [si]
 	test	ch, 0x10	; byte instruction?
 	jnz	.b		; if not, scale immediate
 	shl	bx, 1		; BX = #imm5 << 2
@@ -1020,7 +1021,7 @@ h1000:	xchg	ax, cx		; CX = instruction
 	mov	bx, [bp+oprA]	; BX = #imm5
 	shl	bx, 1		; BX = #imm5 << 1
 	lodsw			; DX:AX = Rn
-	mov	dx, [si+hi-2]
+	mov	dx, [si]
 	add	ax, bx		; DX:AX = Rn + #imm5 << 1
 	adc	dx, 0
 	test	ch, 0x08	; LDRH?
@@ -1066,7 +1067,7 @@ h1010:	mov	di, [bp+oprB]	; di = &Rd
 	add	ax, cx		; DX:AX == DX:AX + CX (= PC/SP + #imm8)
 	adc	dx, 0
 	stosw			; Rd = DX:AX
-	mov	[di+hi-2], dx
+	mov	[di], dx
 	ret
 
 	; miscellaneous instructions
@@ -1102,51 +1103,86 @@ h10111110:	todo
 h10110001 equ	undefined
 h10110011 equ	undefined
 
+	; 10111010XXBBBCCC reverse bytes
+h10111010:
+	inc	ah		; AX = 10111011XXBBBCCC 
+				; to select the second set of jumps in htB2BA
+	; fallthrough
+
 	; 10110010XXBBBCCC (un)signed extend byte/word
+	; 10111011XXBBBCCC reverse bytes (adjusted opcode)
 h10110010:
-	mov	dx, 0x0e	; mask for extracting the instruction fields
-	lea	si, [bp+reglo]
-	mov	di, ax
-	shl	di, 1		; form an offset into the register table
-	and	di, dx		; mask out operand C
-	add	di, si		; DI = &reglo[C]
+	mov	dx, 0x1c	; mask for extracting the instruction fields
+	lea	si, [bp+regs]
+	mov	di, ax		; DI = #### ###X XXBB BCCC
+	shl	di, 1		; DI = #### ##XX XBBB CCC0
+	shl	di, 1		; DI = #### #XXX BBBC CC00
+	and	di, dx		; DI = 0000 0000 000C CC00
+	add	di, si		; DI = &regs[C]
 
+	shr	ax, 1		; AX = 0### #### XXXB BBCC
 	mov	bx, ax
-	shr	ax, 1
-	shr	ax, 1		; form an offset into the register table
-	and	ax, dx		; mask out operand B
-	add	si, ax		; SI = &reglo[B]
+	and	ax, dx		; AX = 0000 0000 000B BB00
+	add	si, ax		; SI = &regs[B]
 
-	mov	cl, 5
-	shr	bx, cl		; BX = 0000010110010XXA
-	and	bx, dx		; BX = 0000000000000XX0
+	mov	cl, 4
+	shr	bx, cl		; BX = 0000 0### #### XXXB
+	and	bx, 0xe		; BX = 0000 0000 0000 XXX0
 	call	fixRd		; set flags on Rd if needed
 	lodsw			; AX = Rm(lo), SI += 2
-	jmp	[htB2+bx]	; jump to instruction handler
+	jmp	[htB2BA+bx]	; jump to instruction handler
 
 	; 1011001000AAABBB SXTH Rd, Rm
 hB200:	cwd			; DX:AX = SXTH(Rm(lo))
 	stosw			; Rd = DX:AX
-	mov	[di+hi-2], dx
+	mov	[di], dx
 	ret
 
 	; 1011001001AAABBB SXTB Rd, Rm
 hB201:	cbw			; DX:AX = SXTB(Rm(lo))
 	cwd
 	stosw			; Rd = DX:AX
-	mov	[di+hi-2], dx
+	mov	[di], dx
 	ret
 
 hB210:	; 1011001010AAABBB UXTH Rd, Rm
 	stosw			; Rd = UXTH(Rm(lo))
-	mov	word [di+hi-2], 0
+	xor	ax, ax
+	stosw
 	ret
 
 	; 1011001011AAABBB UXTB Rd, Rm
 hB211:	stosb			; Rd = UXTB(Rm(lo))
 	xor	ax, ax
 	stosb
-	mov	[di+hi-2], ax
+	stosw
+	ret
+
+	; 1011101000AAABBB REV Rd, Rm
+hBA00:	xchg	ax, dx
+	lodsw			; AX = Rm(hi)
+	xchg	ah, al		; reverse Rm(hi)
+	stosw			; Rd = REV(Rm)
+	xchg	dh, dl		; reverse Rm(lo)
+	mov	[di], dx
+	ret
+
+	; 1011101001AAABBB REV16 Rd, Rm
+hBA01:	xchg	ah, al		; reverse Rm(lo)
+	stosw			; Rd(lo) = REV(Rm(lo))
+	lodsw			; AX = Rm(hi)
+	xchg	ah, al		; reverse Rm(hi)
+	stosw			; Rd(hi) = REV(Rm(hi))
+	ret
+
+	; 1011101010XXXXXX undefined
+hBA10	equ	undefined
+
+	; 1011101011AAABBB REVSH Rd, Rm
+hBA11:	xchg	ah, al		; reverse Rm(lo)
+	cwd			; sign extend into DX:AX
+	stosw			; Rd = DX:AX
+	mov	[di], dx
 	ret
 
 	; 10110111 escape hatch
@@ -1166,54 +1202,6 @@ h10111000 equ	undefined
 	; 101110A1AAAAABBB (CBNZ Rd, #imm5)
 h10111001 equ	undefined
 h10111011 equ	undefined
-
-	; 10111010XXBBBCCC reverse bytes
-h10111010:
-	mov	dx, 0x0e	; mask for extracting the instruction fields
-	lea	si, [bp+reglo]
-	mov	di, ax
-	shl	di, 1		; form an offset into the register table
-	and	di, dx		; mask out operand C
-	add	di, si		; DI = &reglo[C]
-
-	mov	bx, ax
-	shr	ax, 1
-	shr	ax, 1		; form an offset into the register table
-	and	ax, dx		; mask out operand B
-	add	si, ax		; SI = &reglo[B]
-
-	mov	cl, 5
-	shr	bx, cl		; BX = 0000010111010XXA
-	and	bx, dx		; BX = 0000000000000XX0
-	call	fixRd		; set flags on Rd if needed
-	lodsw			; AX = Rm(lo), SI += 2
-	jmp	[htBA+bx]	; jump to instruction handler
-
-	; 1011101000AAABBB REV Rd, Rm
-hBA00:	xchg	ah, al		; reverse Rm(lo)
-	mov	dx, [si+hi-2]	; DX = Rm(hi)
-	xchg	dh, dl		; reverse Rm(hi)
-	mov	[di], dx	; Rd = REV(Rm)
-	mov	[di+hi], ax
-	ret
-
-	; 1011101001AAABBB REV16 Rd, Rm
-hBA01:	xchg	ah, al		; reverse Rm(lo)
-	stosw			; Rd(lo) = REV(Rm(lo))
-	mov	ax, [si+hi-2]	; AX = Rm(hi)
-	xchg	ah, al		; reverse Rm(hi)
-	mov	[di+hi-2], ax	; Rd(hi) = REV(Rm(hi))
-	ret
-
-	; 1011101010XXXXXX undefined
-hBA10	equ	undefined
-
-	; 1011101011AAABBB REVSH Rd, Rm
-hBA11:	xchg	ah, al		; reverse Rm(lo)
-	cwd			; sign extend into DX:AX
-	stosw			; Rd = DX:AX
-	mov	[di+hi-2], dx
-	ret
 
 	; hint instructions
 	; 10111111XXXXYYYY (IT) where YYYY != 0000
@@ -1601,7 +1589,7 @@ ldr:	call	translate	; DX:AX: translated address, BX: handler
 	mov	cx, dx
 	call	[bx+mem.ldr]	; DX:AX = mem[CX:SI]
 	stosw			; Rt = mem[CX:SI]
-	mov	[di+hi-2], dx
+	mov	[di], dx
 	ret
 
 	; load halfword from ARM address DX:AX and deposit into the register
@@ -1611,7 +1599,8 @@ ldrh:	call	translate	; DX:AX: translated address, BX: handler
 	mov	cx, dx
 	call	[bx+mem.ldrh]	; AX = mem[CX:SI]
 	stosw			; Rt = mem[CX:SI]
-	mov	word [di+hi-2], 0
+	xor	ax, ax
+	stosw
 	ret
 
 	; load signed halfword from ARM address DX:AX and deposit into the
@@ -1622,7 +1611,7 @@ ldrsh:	call	translate	; DX:AX: translated address, BX: handler
 	call	[bx+mem.ldrh]	; AX = mem[CX:SI]
 	cwd			; DX:AX = mem[CX:SI]
 	stosw			; Rt = mem[CX:SI] (sign extended)
-	mov	[di+hi-2], dx
+	mov	[di], dx
 	ret
 
 	; load byte from ARM address DX:AX, zero-extend and deposit into the
@@ -1634,7 +1623,7 @@ ldrb:	call	translate	; DX:AX: translated address, BX: handler
 	stosb			; Rt = mem[CX:SI]
 	xor	ax, ax
 	stosb
-	mov	[di+hi-2], ax
+	stosw
 	ret
 
 	; load signed byte from ARM address DX:AX and deposit into the
@@ -1646,7 +1635,7 @@ ldrsb:	call	translate	; DX:AX: translated address, BX: handler
 	cbw			; AX = mem[CX:SI]
 	cwd			; DX:AX = mem[CX:SI]
 	stosw			; Rt = mem[CX:SI] (sign extended)
-	mov	[di+hi-2], dx
+	mov	[di], dx
 	ret
 
 	; store word from register pointed to by DI to ARM address DX:AX.
@@ -1741,10 +1730,12 @@ hB700:	strlo	al, 0		; AL = R0(lo) (error level)
 	; b701 dump registers
 hB701:	call	fixflags	; set up flags
 	mov	di, dump.r0	; load R0 value field
-	lea	si, [bp+reglo]	; SI = &R0
-.regs:	mov	ax, [si+hi]	; AX = reg(hi)
+	lea	si, [bp+regs]	; SI = &R0
+.regs:	lodsw			; AX = reg(lo)
+	push	ax
+	lodsw			; AX = reg(hi), advance to next register
 	call	tohex		; convert high half to hex
-	lodsw			; AX = reg(lo)
+	pop	ax		; AX = reg(lo)
 	call	tohex		; convert low half to hex
 	add	di, dump.field - 8 ; advance to next field
 	cmp	di, dump.endr	; finished dumping registers?
@@ -1791,8 +1782,9 @@ hB703:	lea	di, rlo(0)	; di = &R0
 hB704:	mov	ah, 0x0b
 	int	0x21		; 0x0B: CHECK INPUT STATUS
 	cbw			; AX: input status
-	ldrlo	0, ax		; R0 = input status
-	ldrhi	0, ax
+	lea	di, rlo(0)
+	stosw			; R0 = input status (0 or -1)
+	stosw
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1887,3 +1879,4 @@ errors	dw	.E00, .E01, .E02, .E03, .E04, .E05, .E06, .E07
 .E12	db	"no more files",0
 
 colsp	db	": ",0
+
