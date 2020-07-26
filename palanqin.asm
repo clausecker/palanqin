@@ -619,7 +619,7 @@ h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 	mov	si, [bp+oprB]	; SI = &Rm
 	test	ah, 0x08	; is this LDR Rd, [PC, #imm8]?
 	jnz	.ldr
-	mov	[bp+zsreg], di	; set flags according to Rdn
+	mov	[bp+zsreg], di	; set flags according to Rdn (TODO: wrong!)
 	test	ah, 0x04	; else, is this special data processing?
 	jnz	.sdp		; otherwise, it's data-processing register
 	mov	bx, [bp+oprA]	; BX = 0000AAAA
@@ -968,24 +968,27 @@ h01000100:
 	adc	[di+hi], ax	; Rd(hi) += Rm(hi) + C
 	ret
 
-	; 010001110BBBXXX BX Rm
-	; 010001111BBBXXX BLX Rm
+	; 010001110BBBBXXX BX Rm
+	; 010001111BBBBXXX BLX Rm
 h01000111:
-	test	al, 0x40	; is this BLX?
-	jz	.bx
-	xchg	ax, si		; save Rm for later
-	lea	si, rlo(15)	; SI = &PC
-	lea	di, rlo(14)	; DI = &LR
-	movsw			; LR = PC
+	lea	di, rlo(15)	; DI = &PC
+	test	al, 0x80	; is this BLX?
+	jnz	.blx
+	movsw			; PC = Rm
 	movsw
-	xchg	ax, si		; restore SI
-.bx:	lea	di, rlo(15)	; DI = &PC
-	lodsw			; PC = Rm
-	test	al, 1		; trying to leave thumb state?
-	jnz	.arm
-	stosw
+	test	byte rlo(15), 1	; is the thumb bit set?
+	jz	.arm
+.ret:	ret
+.blx:	lodsw			; DX:AX = PC
+	mov	dx, [di]
+	dec	di		; DI = &PC
+	dec	di
+	movsw			; PC = Rm
 	movsw
-	ret
+	mov	rlo(14), ax	; LR = DX:AX
+	mov	rhi(14), dx
+	test	byte rlo(15), 1	; is the thumb bit set?
+	jnz	.ret
 .arm:	jmp	undefined
 
 	; 0101XXXAAABBBCCC load/store register offset
@@ -1381,6 +1384,10 @@ h1111:	test	ah, 0x08	; is this 11111XXXXXXXXXXX?
 	; fallthrough to BL #imm24
 
 	; 11110SBBBBBBBBBB 11J1JAAAAAAAAAAA BL #imm24
+	lea	si, rlo(15)	; SI = &PC
+	lea	di, rlo(14)	; DI = &LR
+	movsw			; LR = PC
+	movsw
 	mov	cl, 4
 	shl	dx, cl		; DX = 0SBBBBBBBBBB0000
 	mov	bx, ax		; keep a copy of BX for later
@@ -1816,7 +1823,9 @@ hB701:	call	fixflags	; set up flags
 .nc:	jno	.nv		; is OF (V) set in flags?
 	mov	byte [di-1], 'V'
 .nv:	mov	si, dump	; load register dump template into DS:SI
-	jmp	puts		; dump registers and return
+	call	puts		; dump registers and return
+	int3
+	ret
 
 	; b702 console output
 hB702:	strlo	dl, 0		; AL = R0(lo)
