@@ -517,8 +517,9 @@ h000:	mov	bl, ah		; BL = 000XXAAA
 
 	; 0000000000BBBCCC MOVS Rd, Rm
 	; 01000110CBBBBCCC MOV Rd, Rm
-h0000000000:
 h01000110:
+	call	fixRd		; fix flags if needed
+h0000000000:
 	movsw			; Rd = Rm
 	movsw
 	ret
@@ -619,16 +620,15 @@ h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 	mov	si, [bp+oprB]	; SI = &Rm
 	test	ah, 0x08	; is this LDR Rd, [PC, #imm8]?
 	jnz	.ldr
-	mov	[bp+zsreg], di	; set flags according to Rdn (TODO: wrong!)
 	test	ah, 0x04	; else, is this special data processing?
 	jnz	.sdp		; otherwise, it's data-processing register
+	mov	[bp+zsreg], di	; set flags according to Rdn
 	mov	bx, [bp+oprA]	; BX = 0000AAAA
 	shl	bx, 1		; BX = 000AAAA0
 	jmp	[ht010000XXXX+bx]
 .sdp:	mov	bl, ah		; BL = 010001AA
 	and	bx, 0x03	; BX = 000000AA
 	shl	bx, 1		; BX = 00000AA0
-	call	fixRd		; fix flags if needed
 	jmp	[ht010001XX+bx]
 	; 01001BBBCCCCCCCC LDR Rt, [PC, #imm8]
 .ldr:	xchg	si, di		; set up DI = &Rt, SI = #imm8
@@ -962,6 +962,7 @@ h0100001111:
 
 	; ADD Rd, Rm
 h01000100:
+	call	fixRd		; fix flags if needed
 	lodsw			; AX = Rm(lo)
 	add	[di], ax	; Rd(lo) += Rm(lo)
 	lodsw			; AX = Rm(hi)
