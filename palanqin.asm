@@ -1126,7 +1126,7 @@ h10110011 equ	undefined
 
 	; 10111010XXBBBCCC reverse bytes
 h10111010:
-	inc	ah		; AX = 10111011XXBBBCCC 
+	inc	ah		; AX = 10111011XXBBBCCC
 				; to select the second set of jumps in htB2BA
 	; fallthrough
 
@@ -1236,6 +1236,10 @@ h10111111:
 	je	.it		; if yes, generate UNDEFINED
 	ret			; else, treat as NOP
 .it:	jmp	undefined	; generate an undefined instruction exception
+
+	; 11000AAABBBBBBBB STMIA Rn!, {...}
+	; 11001AAABBBBBBBB LDMIA Rn!, {...}
+h1100:	todo
 
 	; 1101BBBBCCCCCCCC B<c> <label>
 	; 11011110CCCCCCCC UDF #imm8
@@ -1412,9 +1416,6 @@ h1111:	test	ah, 0x08	; is this 11111XXXXXXXXXXX?
 	sbb	word rhi(15), 0
 	jmp	undefined	; and treat as an undefined instruction
 .notbl:	todo
-
-	; instruction handlers that have not been implemented yet
-h1100:	todo
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Flag Manipulation                                                          ;;
