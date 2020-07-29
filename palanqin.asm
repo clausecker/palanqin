@@ -199,7 +199,7 @@ file	resw	1		; image file name
 	; the emulator state structure
 	struc	st
 regs	resd	16		; ARM registers
-hi	equ	2		; to turn a reglo pointer into a reghi pointer
+hi	equ	2		; advances low register half to high half
 imgbase	resw	1		; emulator image base segment
 flags	resw	1		; CPU flags in 8086 format
 				; only CF, ZF, SF, and OF are meaningful
@@ -344,7 +344,7 @@ rrr:	mov	cx, ax		; CX = XXXX XXXA AABB BCCC
 	shl	ax, 1		; CX = XXXX XAAA BBBC CC00
 	and	ax, dx		; CX = 0000 0000 000C CC00
 	add	ax, si		; AX = &regs[C]
-	stosw			; oprC = &reglo[C]
+	stosw			; oprC = &regs[C]
 	mov	ax, cx
 	shr	ax, 1		; CX = 0XXX XXXX AAAB BBCC
 	mov	cx, ax
@@ -355,8 +355,8 @@ rrr:	mov	cx, ax		; CX = XXXX XXXA AABB BCCC
 	mov	cl, 3		; prepare shift amount
 	shr	ax, cl		; CX = 0000 XXXX 000A AABB
 	and	ax, dx		; CX = 0000 0000 000A AA00
-	add	ax, si		; CX = &reglo[A]
-	stosw			; oprA = &reglo[A]
+	add	ax, si		; CX = &regs[A]
+	stosw			; oprA = &regs[A]
 	ret
 
 	; special decode handler for instructions starting with 0100
@@ -501,8 +501,8 @@ htB2BA	dw	hB200		; SXTH Rd, Rm
 h000:	mov	bl, ah		; BL = 000XXAAA
 	shr	bl, 1		; BL = 0000XXAA
 	and	bx, 0x0c	; BL = 0000XX00
-	mov	si, [bp+oprB]	; SI = &reglo[Rm]
-	mov	di, [bp+oprC]	; DI = &reglo[Rd]
+	mov	si, [bp+oprB]	; SI = &regs[Rm]
+	mov	di, [bp+oprC]	; DI = &regs[Rd]
 	mov	[bp+zsreg], di	; set SF and ZF according to Rd
 	mov	cx, [bp+oprA]	; CL = imm5 (or Rm for 000110...)
 	test	cx, cx		; if CL == 0 and it's not LSLS, adjust to 32
@@ -574,7 +574,7 @@ h001:	mov	bl, ah		; BL = 001XXAAA
 	shr	bl, 1		; BL = 0001XXAA
 	and	bx, 0xc		; BL = 0000XX00
 	xor	si, si		; SI = 0
-	mov	di, [bp+oprB]	; DI = &reglo[Rd]
+	mov	di, [bp+oprB]	; DI = &regs[Rd]
 	mov	ah, 0		; AX = #imm8
 	mov	[bp+zsreg], di	; set SF and ZF according to Rd
 	jmp	[ht001XX+bx]	; call instruction specific handler
