@@ -85,7 +85,13 @@ start:	mov	sp, end+stack	; beginning of stack
 	shr	dx, cl		; convert to paragraph count
 	mov	ax, cs
 	add	ax, dx		; emulator image base address
-	mov	[bp+imgbase], ax
+
+	; initialise memory maps
+	lea	di, [bp+mmadj]	; initialise adjusted memory tables
+	call	mminit		; to be relative to the image base address
+	lea	di, [bp+mmraw]	; initialise raw memory tables
+	xor	ax, ax		; to base segment 0
+	call	mminit
 
 	; terminate argument vector
 	mov	di, 0x80	; argument vector length pointer
@@ -202,7 +208,6 @@ file	resw	1		; image file name
 	struc	st
 regs	resd	16		; ARM registers
 hi	equ	2		; advances low register half to high half
-imgbase	resw	1		; emulator image base segment
 flags	resw	1		; CPU flags in 8086 format
 				; only CF, ZF, SF, and OF are meaningful
 zsreg	resw	1		; pointer to the register according to which the
@@ -216,6 +221,14 @@ zsreg	resw	1		; pointer to the register according to which the
 oprC	resw	1		; third operand (towards least significant bit)
 oprB	resw	1		; second operand (middle of the instruction)
 oprA	resw	1		; first operand (towards most significant bit)
+
+	; Memory maps.  The high word of an ARM address sans the address space
+	; nibble is looked up in this table to form a segment.  The low word
+	; stays the same, forming an offset.
+mmsize	equ	16		; number of entries in a memory map
+mmraw	resw	mmsize		; memory maps for unadjusted memory
+imgbase	equ	$		; image base address (first seg. of adj. table)
+mmadj	resw	mmsize		; memory maps for adjusted memory
 	endstruc
 
 	section	.bss
@@ -1468,24 +1481,25 @@ fixRd:	push	si		; preserve SI
 	; access the memory behind it.  The offset in AX can be adjusted
 	; by the caller to perform multiple memory accesses on related
 	; addresses, but once it overflows, translate must be called anew.
-	; Expects an ARM address in DX:AX.  Returns a translated address in
-	; DX:AX and a pointer to a structure of accessor functions in BX.
-	; Trashes CX.
+	; Expects an ARM address high word in DX.  Returns a translated segment
+	; in DX and a pointer to a structure of accessor functions in BX.
+	; Preserves all other registers.
 	section	.text
 translate:
 	mov	bl, dh		; load address space nibble
 	and	bx, 0xf0	; isolate address space nibble
-	mov	cl, 3
 	shr	bx, cl		; form a table index
+	shr	bx, cl
+	shr	bx, cl
 	jmp	[xlttab+bx]	; call nibble-specific translator
 
 	; Address space translators.  One for each part of the address space.
 	section	.data
 	align	2, db 0
 xlttab:	dw	xltadj		; 00000000--000fffff adjusted memory
-	dw	xltmem		; 10000000--100fffff unadjusted memory
+	dw	xltraw		; 10000000--100fffff unadjusted memory
 	dw	xltadj		; 20000000--200fffff adjusted memory (mirror)
-	dw	xltmem		; 30000000--300fffff unadjusted memory (mirror)
+	dw	xltraw		; 30000000--300fffff unadjusted memory (mirror)
 	dw	xltio		; 40000000--4000ffff I/O ports
 	dw	xltnone		; 50000000--5fffffff open bus
 	dw	xltnone		; 60000000--6fffffff open bus
@@ -1501,18 +1515,25 @@ xlttab:	dw	xltadj		; 00000000--000fffff adjusted memory
 
 	; translator for imgbase adjusted memory
 	section	.text
-xltadj:	call	linseg		; translate to segmented address
-	add	dx, [bp+imgbase] ; apply imgbase
-	mov	bx, memmem	; ordinary memory access
+xltadj:	xchg	si, dx		; preserve old SI
+	shl	si, 1		; form a table index
+	and	si, 0x001e	; mask out relevant nibble
+	mov	si, [bp+si+mmadj] ; translate address
+	xchg	dx, si		; restore SI and move address to DX
+	mov	bx, memmem	; load accessor function address
 	ret
 
 	; translator for unadjusted memory
-xltmem:	mov	bx, memmem	; ordinary memory access
-	jmp	linseg		; translate to segmented address
+xltraw:	xchg	si, dx		; preserve old SI
+	shl	si, 1		; form a table index
+	and	si, 0x001e	; mask out relevant nibble
+	mov	si, [bp+si+mmraw] ; translate address
+	xchg	dx, si		; restore SI and move address to DX
+	mov	bx, memmem	; load accessor function address
+	ret
 
 	; translator for I/O ports
-xltio:	xor	dx, dx		; ignore high 16 bit of address
-	mov	bx, memio	; I/O memory access
+xltio:	mov	bx, memio	; I/O memory access
 	ret
 
 	; translator for open bus
@@ -1736,9 +1757,16 @@ strb:	call	translate	; DX:AX: translated address, BX: handler
 ;; Address Space Conversion                                                   ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-	; convert DX:AX into a linear address in DX:AX
-	; trashes CX
+	; Initialise memory map DI with consecutive segments starting with the
+	; segment in AX.  Trashes AX, CX, and DI.
 	section	.text
+mminit:	mov	cx, mmsize	; fill one memory map
+.loop:	stosw			; deposit segment into memory map
+	add	ax, 0x1000	; advance to next segment
+	loop	.loop		; and loop mmsize times
+	ret
+
+	; convert DX:AX into a linear address in DX:AX.  Trashes CX
 seglin:	mov	cl, 4
 	rol	dx, cl		; dx = ds >> 12 | ds << 4
 	mov	cx, dx
@@ -1746,16 +1774,6 @@ seglin:	mov	cl, 4
 	and	cl, 0xf0	; cx = ds <<  4
 	add	ax, cx		; ax = ax + (ds >> 12)
 	adc	dx, 0		; apply carry
-	ret
-
-	; convert linear address in DX:AX into a segmented address in DX:AX
-	; the offset is normalised to 0x0000--0x00ff
-	; ignores the high 12 bit of DX, trashes CL
-linseg:	and	dx, 0xf
-	mov	dh, ah
-	mov	cl, 4
-	ror	dx, cl		; dx = dx << 12 | ax >> 4 & 0x0ff0
-	xor	ah, ah		; ax = ax & 0x00ff
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
