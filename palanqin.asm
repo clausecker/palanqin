@@ -129,9 +129,11 @@ start:	mov	sp, end+stack	; beginning of stack
 
 	; read until EOF
 	; TODO: reject image if it is too large
-.2:	call	seglin
-	call	linseg		; normalise address (to give us some space)
-	mov	ds, dx
+.2:	test	ax, ax		; check if AX > 0x8000 to make sure that
+	jns	.3		; 0x8000 bytes remain in DX:AX
+	sub	ax, 0x8000	; if not, shift segments to ensure this
+	add	dh, 0x08
+.3:	mov	ds, dx
 	xchg	dx, ax		; buffer address at DS:DX
 	mov	cx, 0x8000	; number of bytes to read
 	mov	ah, 0x3f
@@ -1951,4 +1953,3 @@ errors	dw	.E00, .E01, .E02, .E03, .E04, .E05, .E06, .E07
 .E12	db	"no more files",0
 
 colsp	db	": ",0
-
