@@ -242,15 +242,13 @@ state	resb	st_size		; BP points here
 	section	.text
 	; load one instruction into AX and advance PC past it.
 	; trashes BX, CX, and SI.
-ifetch:	strlo	ax, 15		; DX:AX = PC
-	strhi	dx, 15
-	and	al, ~1		; clear thumb bit
+ifetch:	strhi	cx, 15		; high part of PC for translation
+	call	translate	; BX: handler, CX:AX: address
+	strlo	si, 15		; CX:SI = translated address
+	and	si, ~1		; clear thumb bit
 	add	word rlo(15), 2	; PC += 2
 	adc	word rhi(15), 0
-	call	translate	; BX: handler, DX:AX: address
-	xchg	ax, si		; CX:SI = DX:AX
-	mov	cx, dx
-	jmp	[bx+mem.ldrh]	; AX = instruction
+	jmp	[bx+mem.ldrh]	; AX = instruction, tail call
 
 	; run the emulation until we need to stop for some reason
 run:	push	cs		; set up es = ds = cs
@@ -262,6 +260,7 @@ run:	push	cs		; set up es = ds = cs
 
 	; simulate one instruction.  Assumes ES=DS=CS.
 step:	call	ifetch		; fetch instruction
+	int3
 	push	ax		; push a copy of the current instruction
 	mov	bx, ax		; and keep another one in AX
 	mov	cl, 5		; mask out the instruction's top 4 bits
@@ -646,15 +645,15 @@ h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 	shl	bx, 1		; BX = 00000AA0
 	jmp	[ht010001XX+bx]
 	; 01001BBBCCCCCCCC LDR Rt, [PC, #imm8]
-.ldr:	xchg	si, di		; set up DI = &Rt, SI = #imm8
+.ldr:	xchg	di, si		; set up DI = &Rt, SI = #imm8
 	call	fixRd		; set flags on Rd if needed
-	strlo	ax, 15		; DX:AX = R15
-	strhi	dx, 15
-	shl	si, 1		; CX = #imm8 << 2 + 2
+	strlo	ax, 15		; AX = R15(lo)
+	shl	si, 1		; SI = #imm8 << 2 + 2
 	inc	si
 	shl	si, 1
-	add	ax, si		; DX:AX = R15 + #imm8
-	adc	dx, 0
+	xor	cx, cx
+	add	ax, si		; CX:AX = R15 + #imm8
+	adc	cx, rhi(15)
 	and	al, ~3		; align to word boundary
 	jmp	ldr		; perform the actual load
 
@@ -1013,71 +1012,74 @@ h0101:	mov	bl, ah		; BL = 0101XXXA
 	mov	di, [bp+oprC]	; DI = &Rt
 	call	fixRd		; fix flags for Rt
 	mov	si, [bp+oprB]	; SI = &Rn
-	lodsw			; DX:AX = Rn
-	mov	dx, [si]
+	lodsw			; CX:AX = Rn
+	mov	cx, [si]
 	mov	si, [bp+oprA]	; SI = &rm
-	add	ax, [si]	; DX:AX = Rn + Rm
-	adc	dx, [si+hi]
+	add	ax, [si]	; CX:AX = Rn + Rm
+	adc	cx, [si+hi]
 	jmp	[ht0101+bx]	; perform instruction behaviour
 
 	; 01100AAAAABBBCCC STR	Rt, [Rn, #imm5]
 	; 01110AAAAABBBCCC STRB Rt, [Rn, #imm5]
 	; 01101AAAAABBBCCC LDR  Rt, [Rn, #imm5]
 	; 01111AAAAABBBCCC LDRB Rt, [Rn, #imm5]
-h011:	xchg	ax, cx		; CX = instruction
-	mov	si, [bp+oprB]	; SI = &Rn
+h011:	mov	si, [bp+oprB]	; SI = &Rn
 	mov	di, [bp+oprC]	; DI = &Rt
+	push	ax		; remember the instruction
 	call	fixRd		; fix flags on Rt
+	pop	dx		; DX = instruction
 	mov	bx, [bp+oprA]	; BX = #imm5
-	lodsw			; DX:AX = Rn
-	mov	dx, [si]
-	test	ch, 0x10	; byte instruction?
+	lodsw			; CX:AX = Rn
+	mov	cx, [si]
+	test	dh, 0x10	; byte instruction?
 	jnz	.b		; if not, scale immediate
 	shl	bx, 1		; BX = #imm5 << 2
 	shl	bx, 1
-.b:	add	ax, bx		; DX:AX = Rn + #imm5 << 2
-	adc	dx, 0
-	test	ch, 0x08	; is this LDR(B)?
+.b:	add	ax, bx		; CX:AX = Rn + #imm5 << 2
+	adc	cx, 0
+	test	dh, 0x08	; is this LDR(B)?
 	jz	.str		; otherwise it is STR(B)
-	test	ch, 0x10	; is this LDR or LDRB?
+	test	dh, 0x10	; is this LDR or LDRB?
 	jnz	.ldrb
 	jmp	ldr
 .ldrb:	jmp	ldrb
-.str:	test	ch, 0x10	; is this STR or STRB?
+.str:	test	dh, 0x10	; is this STR or STRB?
 	jnz	.strb
 	jmp	str
 .strb:	jmp	strb
 
 	; 10000AAAAABBBCCC STRH Rt, [Rn, #imm5]
 	; 10001AAAAABBBCCC LDRH Rt, [Rn, #imm5]
-h1000:	xchg	ax, cx		; CX = instruction
-	mov	si, [bp+oprB]	; SI = &Rn
+h1000:	mov	si, [bp+oprB]	; SI = &Rn
 	mov	di, [bp+oprC]	; DI = &Rt
+	push	ax		; remember the instruction
 	call	fixRd		; fix flags on Rt
+	pop	dx		; and restore it to DX
 	mov	bx, [bp+oprA]	; BX = #imm5
 	shl	bx, 1		; BX = #imm5 << 1
-	lodsw			; DX:AX = Rn
-	mov	dx, [si]
-	add	ax, bx		; DX:AX = Rn + #imm5 << 1
-	adc	dx, 0
-	test	ch, 0x08	; LDRH?
+	lodsw			; CX:AX = Rn
+	mov	cx, [si]
+	add	ax, bx		; CX:AX = Rn + #imm5 << 1
+	adc	cx, 0
+	test	dh, 0x08	; LDRH?
 	jz	.strh		; otherwise it is STRH
 	jmp	ldrh
 .strh:	jmp	strh
 
 	; 10010BBBCCCCCCCC STR Rd, [SP, #imm8]
 	; 10011BBBCCCCCCCC LDR Rd, [SP, #imm8]
-h1001:	xchg	ax, cx		; CX = instruction
+h1001:	push	ax		; remember the instruction
 	mov	di, [bp+oprB]	; DI = &Rt
 	call	fixRd
+	pop	dx		; DX = instruction
 	xor	ax, ax
-	mov	al, cl		; AX = #imm8
+	mov	al, [bp+oprC]	; AX = #imm8
 	shl	ax, 1		; AX = #imm8 << 2
 	shl	ax, 1
-	xor	dx, dx
-	add	ax, rlo(13)	; DX:AX = SP + #imm8
-	adc	dx, rhi(13)
-	test	ch, 0x08	; is this LDR?
+	xor	cx, cx
+	add	ax, rlo(13)	; CX:AX = SP + #imm8
+	adc	cx, rhi(13)
+	test	dh, 0x08	; is this LDR?
 	jz	.str		; otherwise it is STR
 	jmp	ldr
 .str:	jmp	str
@@ -1481,16 +1483,16 @@ fixRd:	push	si		; preserve SI
 	; access the memory behind it.  The offset in AX can be adjusted
 	; by the caller to perform multiple memory accesses on related
 	; addresses, but once it overflows, translate must be called anew.
-	; Expects an ARM address high word in DX.  Returns a translated segment
-	; in DX and a pointer to a structure of accessor functions in BX.
+	; Expects an ARM address high word in CX.  Returns a translated segment
+	; in CX and a pointer to a structure of accessor functions in BX.
 	; Preserves all other registers.
 	section	.text
 translate:
-	mov	bl, dh		; load address space nibble
+	mov	bl, ch		; load address space nibble
 	and	bx, 0xf0	; isolate address space nibble
-	shr	bx, cl		; form a table index
-	shr	bx, cl
-	shr	bx, cl
+	shr	bx, 1		; form a table index
+	shr	bx, 1
+	shr	bx, 1
 	jmp	[xlttab+bx]	; call nibble-specific translator
 
 	; Address space translators.  One for each part of the address space.
@@ -1515,20 +1517,20 @@ xlttab:	dw	xltadj		; 00000000--000fffff adjusted memory
 
 	; translator for imgbase adjusted memory
 	section	.text
-xltadj:	xchg	si, dx		; preserve old SI
+xltadj:	xchg	si, cx		; preserve old SI
 	shl	si, 1		; form a table index
 	and	si, 0x001e	; mask out relevant nibble
 	mov	si, [bp+si+mmadj] ; translate address
-	xchg	dx, si		; restore SI and move address to DX
+	xchg	cx, si		; restore SI and move address to CX
 	mov	bx, memmem	; load accessor function address
 	ret
 
 	; translator for unadjusted memory
-xltraw:	xchg	si, dx		; preserve old SI
+xltraw:	xchg	si, cx		; preserve old SI
 	shl	si, 1		; form a table index
 	and	si, 0x001e	; mask out relevant nibble
 	mov	si, [bp+si+mmraw] ; translate address
-	xchg	dx, si		; restore SI and move address to DX
+	xchg	cx, si		; restore SI and move address to CX
 	mov	bx, memmem	; load accessor function address
 	ret
 
@@ -1675,43 +1677,39 @@ ldstnone:
 	mov	dx, ax
 	ret
 
-	; load word from ARM address DX:AX and deposit into the register
+	; load word from ARM address CX:AX and deposit into the register
 	; pointed to by DI.
-ldr:	call	translate	; DX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = DX:AX
-	mov	cx, dx
+ldr:	call	translate	; CX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldr]	; DX:AX = mem[CX:SI]
 	stosw			; Rt = mem[CX:SI]
 	mov	[di], dx
 	ret
 
-	; load halfword from ARM address DX:AX and deposit into the register
+	; load halfword from ARM address CX:AX and deposit into the register
 	; pointed to by DI.
-ldrh:	call	translate	; DX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = DX:AX
-	mov	cx, dx
+ldrh:	call	translate	; CX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldrh]	; AX = mem[CX:SI]
 	stosw			; Rt = mem[CX:SI]
 	xor	ax, ax
 	stosw
 	ret
 
-	; load signed halfword from ARM address DX:AX and deposit into the
+	; load signed halfword from ARM address CX:AX and deposit into the
 	; the register pointed to by DI.
-ldrsh:	call	translate	; DX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = DX:AX
-	mov	cx, dx
+ldrsh:	call	translate	; CX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldrh]	; AX = mem[CX:SI]
 	cwd			; DX:AX = mem[CX:SI]
 	stosw			; Rt = mem[CX:SI] (sign extended)
 	mov	[di], dx
 	ret
 
-	; load byte from ARM address DX:AX, zero-extend and deposit into the
+	; load byte from ARM address CX:AX, zero-extend and deposit into the
 	; register pointed to by DI.
-ldrb:	call	translate	; DX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = DX:AX
-	mov	cx, dx
+ldrb:	call	translate	; CX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldrb]	; AL = mem[CX:SI]
 	stosb			; Rt = mem[CX:SI]
 	xor	ax, ax
@@ -1719,11 +1717,10 @@ ldrb:	call	translate	; DX:AX: translated address, BX: handler
 	stosw
 	ret
 
-	; load signed byte from ARM address DX:AX and deposit into the
+	; load signed byte from ARM address CX:AX and deposit into the
 	; the register pointed to by DI.
-ldrsb:	call	translate	; DX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = DX:AX
-	mov	cx, dx
+ldrsb:	call	translate	; CX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldrb]	; AL = mem[CX:SI]
 	cbw			; AX = mem[CX:SI]
 	cwd			; DX:AX = mem[CX:SI]
@@ -1731,25 +1728,22 @@ ldrsb:	call	translate	; DX:AX: translated address, BX: handler
 	mov	[di], dx
 	ret
 
-	; store word from register pointed to by DI to ARM address DX:AX.
-str:	call	translate	; DX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = DX:AX
-	mov	cx, dx
+	; store word from register pointed to by DI to ARM address CX:AX.
+str:	call	translate	; CX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = CX:AX
 	mov	ax, [di]	; DX:AX = Rt
 	mov	dx, [di+hi]
 	jmp	[bx+mem.str]
 
-	; store halfword from register pointed to by DI to ARM address DX:AX.
-strh:	call	translate	; DX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = DX:AX
-	mov	cx, dx
+	; store halfword from register pointed to by DI to ARM address CX:AX.
+strh:	call	translate	; CX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = CX:AX
 	mov	ax, [di]	; AX = Rt
 	jmp	[bx+mem.strh]
 
-	; store byte from register pointed to by DI to ARM address DX:AX.
-strb:	call	translate	; DX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = DX:AX
-	mov	cx, dx
+	; store byte from register pointed to by DI to ARM address CX:AX.
+strb:	call	translate	; CX:AX: translated address, BX: handler
+	xchg	ax, si		; CX:SI = CX:AX
 	mov	al, [di]	; AL = Rt
 	jmp	[bx+mem.strb]
 
@@ -1845,9 +1839,7 @@ hB701:	call	fixflags	; set up flags
 .nc:	jno	.nv		; is OF (V) set in flags?
 	mov	byte [di-1], 'V'
 .nv:	mov	si, dump	; load register dump template into DS:SI
-	call	puts		; dump registers and return
-	int3
-	ret
+	jmp	puts		; dump registers and return
 
 	; b702 console output
 hB702:	strlo	dl, 0		; AL = R0(lo)
