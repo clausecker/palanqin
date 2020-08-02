@@ -21,6 +21,7 @@ Currently implemented instructions:
     CMP   Rn, #imm8
     CMP   Rn, Rm
     EORS  Rn, Rm
+    LDMIA Rn!, {...}
     LDR   Rt, [PC, #imm8]
     LDR   Rt, [SP, #imm8]
     LDR   Rt, [Rn, #imm5]
@@ -51,6 +52,7 @@ Currently implemented instructions:
     RSBS  Rd, Rm, #0
     SEV
     SBCS  Rd, Rm
+    STMIA Rn!, {...}
     STR   Rt, [SP, #imm8]
     STR   Rt, [Rn, #imm5]
     STR   Rt, [Rn, Rm]
@@ -78,7 +80,7 @@ Currently implemented escape hatches:
     0xb701 dump registers
     0xb702 console output
     0xb703 console input
-    0bx704 check input status
+    0xb704 check input status
 
 Other items to be done:
 

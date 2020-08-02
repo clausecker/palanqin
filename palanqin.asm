@@ -1320,7 +1320,61 @@ h10111111:
 
 	; 11000AAABBBBBBBB STMIA Rn!, {...}
 	; 11001AAABBBBBBBB LDMIA Rn!, {...}
-h1100:	todo
+h1100:	push	ax		; remember the instruction on the stack
+	xchg	ax, di		; and in DI
+	call	fixflags	; fix flags unconditionally as it is too
+				; complicated to determine if we need to or not
+	mov	si, [bp+oprB]	; SI = &Rn
+	push	si		; remember a copy of &Rn
+	lodsw			; CX:AX = Rn
+	mov	cx, [si]
+	test	di, 0x0800	; is this a load or is it a store?
+	lea	di, rlo(0)	; DI = &R0
+	jnz	.ldmia
+
+.stmia:	shr	byte [bp+oprC], 1 ; advance bit-mask to next register
+	ja	.stfin		; any registers left (CF != 0 or ZF != 0)?
+	jnc	.nostr		; store the current register?
+	push	ax		; remember the current address
+	push	cx
+	call	str		; deposit register into memory
+	pop	cx		; restore the current address
+	pop	ax
+	add	ax, 4		; advance address by 4
+	adc	cx, 0
+.nostr:	add	di, 4		; advance to next register
+	jmp	.stmia
+.stfin:	pop	di		; DI = &Rn
+	stosw			; Rn = CX:AX
+	mov	[di], cx
+	inc	sp		; advance past instruction copy
+	inc	sp
+	ret
+
+.ldmia: shr	byte [bp+oprC], 1 ; advance bit-mask to next register
+	ja	.ldfin		; any registers left (CF != 0 or ZF != 0)?
+	jnc	.noldr		; store the current register?
+	push	ax		; remember the current address
+	push	cx
+	call	ldr		; load register from memory
+	pop	cx		; restore the current address
+	pop	ax
+	add	ax, 4		; advance address by 4
+	adc	cx, 0
+.noldr:	add	di, 4		; advance to next register
+	jmp	.ldmia
+.ldfin:	pop	di		; DI = &Rn
+	mov	dx, cx		; DX:AX = final address
+	pop	cx		; restore instruction
+	xchg	cl, ch		; extract field AAA
+	and	cl, 0x07
+	mov	bl, 0x01	; BL = 1 << AAA
+	shl	bl, cl
+	test	bl, ch		; is Rn in the register list?
+	jnz	.ret		; if not, write back Rn
+	stosw			; Rn = DX:AX
+	mov	[di], dx
+.ret:	ret
 
 	; 1101BBBBCCCCCCCC B<c> <label>
 	; 11011110CCCCCCCC UDF #imm8
