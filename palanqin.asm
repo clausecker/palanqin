@@ -1194,29 +1194,29 @@ h10110011 equ	undefined
 	; 10110100BBBBBBBB PUSH {...}
 	; 10110101BBBBBBBB PUSH {..., LR}
 h1011010:
-	lea	di, rlo(0)	; SI = &R0
-.loop:	shr	al, 1		; advance bit-mask to next register
+	push	ax		; remember the instruction
+	lea	di, rlo(0)	; DI = &R0
+.loop:	shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	ja	.done		; any registers left (CF != 0 or ZF != 0)?
 	jnc	.nostr		; store current register?
-	mov	si, rlo(13)	; CX:SI = SP
+	mov	ax, rlo(13)	; CX:AX = SP
 	mov	cx, rhi(13)
-	sub	si, 4		; CX:SI -= 4
+	sub	ax, 4		; CX:AX -= 4
 	sbb	cx, 0
-	mov	rlo(13), si	; SP -= 4
+	mov	rlo(13), ax	; SP -= 4
 	mov	rhi(13), cx
-	push	ax		; remember the instruction
 	call	str		; deposit register into memory
-	pop	ax		; restore the instruction
 .nostr:	add	di, 4		; advance to next register
 	jmp	.loop		; and try again if any registers are left
-.done:	test	ax, 0x100	; store LR?
+.done:	pop	ax		; restore the instruction
+	test	ax, 0x100	; store LR?
 	jz	.nolr
-	mov	si, rlo(13)	; CX:SI = SP
+	mov	ax, rlo(13)	; CX:SI = SP
 	mov	cx, rhi(13)
-	sub	si, 4		; CX:SI -= 4
+	sub	ax, 4		; CX:SI -= 4
 	sbb	cx, 0
 	mov	rlo(13), si	; SP -= 4
-	mov	rhi(13), cx
+	mov	rhi(13), ax
 	lea	di, rlo(14)	; DI = &LR
 	jmp	str		; deposit LR into memory
 .nolr:	ret
@@ -1277,25 +1277,23 @@ h10111011 equ	undefined
 	; 10111100AAAAAAAA POP {...}
 	; 10111101AAAAAAAA POP {..., PC}
 h1011110:
-	xchg	ax, cx		; preserve AX
+	push	ax		; remember the instruction
 	call	fixflags	; fix flags (easier than checking for each reg)
-	xchg	ax, cx		; restore AX
-	lea	di, rlo(0)	; SI = &R0
-.loop:	shr	al, 1		; advance bit-mask to next register
+	lea	di, rlo(0)	; DI = &R0
+.loop:	shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	ja	.done		; any registers left (CF != 0 or ZF != 0)?
 	jnc	.noldr		; store current register?
-	mov	si, rlo(13)	; CX:SI = SP
+	mov	ax, rlo(13)	; CX:AX = SP
 	mov	cx, rhi(13)
 	add	word rlo(13), 4	; SP += 4
 	adc	word rhi(13), 0
-	push	ax		; remember the instruction
 	call	ldr		; load register from memory
-	pop	ax		; restore the instruction
 .noldr:	add	di, 4		; advance to next register
 	jmp	.loop		; and try again if any registers are left
-.done:	test	ax, 0x100	; load PC?
+.done:	pop	ax		; restore the instruction
+	test	ax, 0x100	; load PC?
 	jz	.nopc
-	mov	si, rlo(13)	; CX:SI = SP
+	mov	ax, rlo(13)	; CX:AX = SP
 	mov	cx, rhi(13)
 	add	word rlo(13), 4	; SP += 4
 	adc	word rhi(13), 0
