@@ -42,6 +42,8 @@ Currently implemented instructions:
     MVNS  Rd, Rm
     NOP
     ORRS  Rd, Rm
+    POP   {...}
+    PUSH  {...}
     REV   Rd, Rm
     REV16 Rd, Rm
     REVSH Rd, Rm

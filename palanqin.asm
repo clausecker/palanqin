@@ -484,16 +484,16 @@ ht1011XXXX:
 	dw	h10110001	; (CBZ Rn, #imm5)
 	dw	h10110010	; SXTB/SXTH/UXTB/UXTH
 	dw	h10110011	; (CBZ Rn, #imm5)
-	dw	h10110100	; PUSH {...}
-	dw	h10110101	; PUSH {..., LR}
+	dw	h1011010	; PUSH {...}
+	dw	h1011010	; PUSH {..., LR}
 	dw	h10110110	; CPS
 	dw	h10110111	; escape hatch
 	dw	h10111000	; undefined
 	dw	h10111001	; (CBNZ Rn, #imm5)
 	dw	h10111010	; REV/REV16/REVSH
 	dw	h10111011	; (CBNZ Rn, #imm5)
-	dw	h10111100	; POP {...}
-	dw	h10111101	; POP {..., LR}
+	dw	h1011110	; POP {...}
+	dw	h1011110	; POP {..., LR}
 	dw	h10111110	; BKPT #imm8
 	dw	h10111111	; (IT), hints
 
@@ -1130,16 +1130,71 @@ h10110000:
 	sbb	word rhi(13), 0
 	ret
 
-h10110100:
-h10110101:
 h10110110:
-h10111100:
-h10111101:
 h10111110:	todo
+
+	; 10111100AAAAAAAA POP {...}
+	; 10111101AAAAAAAA POP {..., PC}
+h1011110:
+	xchg	ax, cx		; preserve AX
+	call	fixflags	; fix flags (easier than checking for each reg)
+	xchg	ax, cx		; restore AX
+	lea	di, rlo(0)	; SI = &R0
+.loop:	shr	al, 1		; advance bit-mask to next register
+	ja	.done		; any registers left (CF != 0 or ZF != 0)?
+	jnc	.noldr		; store current register?
+	mov	si, rlo(13)	; CX:SI = SP
+	mov	cx, rhi(13)
+	add	word rlo(13), 4	; SP += 4
+	adc	word rhi(13), 0
+	push	ax		; remember the instruction
+	call	ldr		; load register from memory
+	pop	ax		; restore the instruction
+.noldr:	add	di, 4		; advance to next register
+	jmp	.loop		; and try again if any registers are left
+.done:	test	ax, 0x100	; load PC?
+	jz	.nopc
+	mov	si, rlo(13)	; CX:SI = SP
+	mov	cx, rhi(13)
+	add	word rlo(13), 4	; SP += 4
+	adc	word rhi(13), 0
+	lea	di, rlo(15)	; DI = &PC
+	jmp	ldr		; load PC from memory
+.nopc:	ret
 
 	; 101100B1BBBBBCCC (CBZ Rd, #imm5)
 h10110001 equ	undefined
 h10110011 equ	undefined
+
+	; 10110100BBBBBBBB PUSH {...}
+	; 10110101BBBBBBBB PUSH {..., LR}
+h1011010:
+	lea	di, rlo(0)	; SI = &R0
+.loop:	shr	al, 1		; advance bit-mask to next register
+	ja	.done		; any registers left (CF != 0 or ZF != 0)?
+	jnc	.nostr		; store current register?
+	mov	si, rlo(13)	; CX:SI = SP
+	mov	cx, rhi(13)
+	sub	si, 4		; CX:SI -= 4
+	sbb	cx, 0
+	mov	rlo(13), si	; SP -= 4
+	mov	rhi(13), cx
+	push	ax		; remember the instruction
+	call	str		; deposit register into memory
+	pop	ax		; restore the instruction
+.nostr:	add	di, 4		; advance to next register
+	jmp	.loop		; and try again if any registers are left
+.done:	test	ax, 0x100	; store LR?
+	jz	.nolr
+	mov	si, rlo(13)	; CX:SI = SP
+	mov	cx, rhi(13)
+	sub	si, 4		; CX:SI -= 4
+	sbb	cx, 0
+	mov	rlo(13), si	; SP -= 4
+	mov	rhi(13), cx
+	lea	di, rlo(14)	; DI = &LR
+	jmp	str		; deposit LR into memory
+.nolr:	ret
 
 	; 10111010XXBBBCCC reverse bytes
 h10111010:
@@ -1678,12 +1733,12 @@ ldstnone:
 	ret
 
 	; load word from ARM address CX:AX and deposit into the register
-	; pointed to by DI.
+	; pointed to by DI.  Preserve DI.
 ldr:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldr]	; DX:AX = mem[CX:SI]
-	stosw			; Rt = mem[CX:SI]
-	mov	[di], dx
+	mov	[di], ax	; Rt = mem[CX:SI]
+	mov	[di+hi], dx
 	ret
 
 	; load halfword from ARM address CX:AX and deposit into the register
@@ -1729,6 +1784,7 @@ ldrsb:	call	translate	; CX:AX: translated address, BX: handler
 	ret
 
 	; store word from register pointed to by DI to ARM address CX:AX.
+	; Preserve DI.
 str:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	mov	ax, [di]	; DX:AX = Rt
