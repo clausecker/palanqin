@@ -20,7 +20,10 @@ Currently implemented instructions:
     CMN   Rn, Rm
     CMP   Rn, #imm8
     CMP   Rn, Rm
+    DMB   #option
+    DSB   #option
     EORS  Rn, Rm
+    ISB   #option
     LDMIA Rn!, {...}
     LDR   Rt, [PC, #imm8]
     LDR   Rt, [SP, #imm8]

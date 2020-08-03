@@ -1514,21 +1514,14 @@ h1110:	test	ah, 0x08	; is this B #imm11?
 .udf:	jmp	undefined	; 11101XXXXXXXXXXX is undefined
 
 	; 32 bit instructions
-	; 11110011100XAAAA 10X0XXXXBBBBBBBB MSR spec_reg, Rn
-	; 1111001111XXXXXX 10X0AAAABBBBBBBB MRS Rn, spec_reg
-	; 111100111011XXXX 10X0XXXX0100AAAA DSB #option
-	; 111100111011XXXX 10X0XXXX0101AAAA DMB #option
-	; 111100111011XXXX 10X0XXXX0110AAAA ISB #option
-	; 111101111111AAAA 1010AAAAAAAAAAAA UDF #imm16
-h1111:	test	ah, 0x08	; is this 11111XXXXXXXXXXX?
+h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 	jnz	h1110.udf	; if yes, execute as undefined.
 	push	ax		; remember low instruction word
 	call	ifetch		; fetch high instruction word into AX
 	pop	dx		; AX:DX holds the instruction
 	test	ax, ax		; is AX 0XXXXXXXXXXXXXXX?
 	jns	.udf		; if yes, execute as undefined.
-	mov	cl, ah
-	and	cl, 0x50	; mask high word to 0X0X00000000
+	test	ah, 0x50	; test high word with 010100000000
 	jz	.notbl		; for the case X0X0XXXXXXXX
 	jpo	.udf		; if it was not X1X1XXXXXXXX
 	; fallthrough to BL #imm24
@@ -1557,10 +1550,41 @@ h1111:	test	ah, 0x08	; is this 11111XXXXXXXXXXX?
 	adc	rhi(15), dx
 	ret
 
+	; 111101111111AAAA 1010AAAAAAAAAAAA UDF #imm16
+	; and other undefined instructions
 .udf:	sub	word rlo(15), 2	; move PC back to current instruction + 2
 	sbb	word rhi(15), 0
 	jmp	undefined	; and treat as an undefined instruction
-.notbl:	todo
+
+	; if we get here, it is known that the instruction has the form
+	; 11110XXXXXXXXXXX 10Y0YYYYYYYYYYYY
+.notbl:	cmp	dh, 0xf3	; is it 11110011?
+	jne	.udf
+	cmp	dl, 0xef	; is it 1111001111101111 (MRS)?
+	je	.mrs
+	mov	cx, dx		; CX = 11110XXXXXXXXXXX
+	and	cl, 0xf0	; CX = 11110XXXXXXX0000
+	cmp	cl, 0x80	; is it 111100111000XXXX?
+	je	.msr
+	cmp	cl, 0xb0	; is it 111100111011XXXX?
+	jne	.udf		; if not, we have an undefined instruction
+	cmp	al, 0x40	; is it 10Y0YYYY0100AAAA -- 10Y0YYYY0110AAAA?
+	jb	.udf
+	cmp	al, 0x6f
+	ja	.udf
+
+	; 111100111011XXXX 10X0XXXX0100AAAA DSB #option
+	; 111100111011XXXX 10X0XXXX0101AAAA DMB #option
+	; 111100111011XXXX 10X0XXXX0110AAAA ISB #option
+	xchg	ax, [bp+oprA]	; perform a poor man's mfence
+	ret
+
+	; 11110011111XXXXX 10X0AAAABBBBBBBB MRS Rn, spec_reg
+.mrs:	todo
+
+	; 11110011100XAAAA 10X0XXXXBBBBBBBB MSR spec_reg, Rn
+.msr:	sub	dx, cx		; DX = 000000000000AAAA
+	todo
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Flag Manipulation                                                          ;;
