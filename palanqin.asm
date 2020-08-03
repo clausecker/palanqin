@@ -1194,32 +1194,34 @@ h10110011 equ	undefined
 	; 10110100BBBBBBBB PUSH {...}
 	; 10110101BBBBBBBB PUSH {..., LR}
 h1011010:
-	push	ax		; remember the instruction
-	lea	di, rlo(0)	; DI = &R0
-.loop:	shr	byte [bp+oprC], 1 ; advance bit-mask to next register
-	ja	.done		; any registers left (CF != 0 or ZF != 0)?
-	jnc	.nostr		; store current register?
+	test	ax, 0x0100	; want to push LR?
 	mov	ax, rlo(13)	; CX:AX = SP
 	mov	cx, rhi(13)
+	jz	.nolr		; (mov preserves flags)
+	lea	di, rlo(14)
 	sub	ax, 4		; CX:AX -= 4
 	sbb	cx, 0
-	mov	rlo(13), ax	; SP -= 4
-	mov	rhi(13), cx
-	call	str		; deposit register into memory
-.nostr:	add	di, 4		; advance to next register
-	jmp	.loop		; and try again if any registers are left
-.done:	pop	ax		; restore the instruction
-	test	ax, 0x100	; store LR?
-	jz	.nolr
-	mov	ax, rlo(13)	; CX:SI = SP
-	mov	cx, rhi(13)
-	sub	ax, 4		; CX:SI -= 4
+	push	ax		; preserve CX:AX around str call
+	push	cx
+	call	str		; deposit LR
+	pop	cx
+	pop	ax
+.nolr:	lea	di, rlo(7)	; DI = &R7
+.loop:	shl	byte [bp+oprC], 1 ; advance bit-mask to next register
+	ja	.done		; any registers left (CF != 0 or ZF != 0)?
+	jnc	.nostr		; store current register?
+	sub	ax, 4		; CX:AX -= 4
 	sbb	cx, 0
-	mov	rlo(13), si	; SP -= 4
-	mov	rhi(13), ax
-	lea	di, rlo(14)	; DI = &LR
-	jmp	str		; deposit LR into memory
-.nolr:	ret
+	push	ax		; preserve CX:AX around str call
+	push	cx
+	call	str		; deposit register into memory
+	pop	cx
+	pop	ax
+.nostr:	sub	di, 4		; advance to next register
+	jmp	.loop		; and try again if any registers are left
+.done:	mov	rlo(13), ax	; write back SP
+	mov	rhi(13), cx
+	ret
 
 	; 10110110011ABBBB CPS
 h10110110:
@@ -1279,27 +1281,35 @@ h10111011 equ	undefined
 h1011110:
 	push	ax		; remember the instruction
 	call	fixflags	; fix flags (easier than checking for each reg)
+	mov	ax, rlo(13)	; CX:AX = SP
+	mov	cx, rhi(13)
 	lea	di, rlo(0)	; DI = &R0
 .loop:	shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	ja	.done		; any registers left (CF != 0 or ZF != 0)?
 	jnc	.noldr		; store current register?
-	mov	ax, rlo(13)	; CX:AX = SP
-	mov	cx, rhi(13)
-	add	word rlo(13), 4	; SP += 4
-	adc	word rhi(13), 0
+	push	ax		; preserve CX:AX around ldr call
+	push	cx
 	call	ldr		; load register from memory
+	pop	cx
+	pop	ax
+	add	ax, 4		; CX:AX += 4
+	adc	cx, 0
 .noldr:	add	di, 4		; advance to next register
 	jmp	.loop		; and try again if any registers are left
-.done:	pop	ax		; restore the instruction
-	test	ax, 0x100	; load PC?
+.done:	pop	dx		; restore the instruction
+	test	dh, 0x01	; load PC?
 	jz	.nopc
-	mov	ax, rlo(13)	; CX:AX = SP
-	mov	cx, rhi(13)
-	add	word rlo(13), 4	; SP += 4
-	adc	word rhi(13), 0
 	lea	di, rlo(15)	; DI = &PC
-	jmp	ldr		; load PC from memory
-.nopc:	ret
+	push	ax		; preserve CX:AX around ldr call
+	push	cx
+	call	ldr		; load PC from memory
+	pop	cx
+	pop	ax
+	add	ax, 4		; CX:AX += 4
+	adc	cx, 0
+.nopc:	mov	rlo(13), ax	; write back SP
+	mov	rhi(13), cx
+	ret
 
 	; 10111110AAAAAAAA BKPT #imm8
 h10111110:
