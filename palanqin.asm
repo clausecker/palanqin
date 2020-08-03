@@ -377,9 +377,9 @@ rrr:	mov	cx, ax		; CX = XXXX XXXA AABB BCCC
 	; 010000... is decoded as imm5 / reg / reg (imm4, really)
 	; 010001... is decoded in a special manner
 	; 01001... is decoded as reg / imm8
-d0100:	test	ah, 0x08	; is this 01001...?
+d0100:	test	ax, 0x0800	; is this 01001...?
 	jnz	rimm8		; if yes, decode as reg / imm8
-	test	ah, 0x04	; else, is this 010000...?
+	test	ax, 0x0400	; else, is this 010000...?
 	jz	imm5rr		; if yes, decode as imm5 / reg / reg
 
 	; if we get here, we have instruction 0100 01XX CBBB BCCC
@@ -539,7 +539,7 @@ h0000000000:
 	ret
 
 	; 00011XXAAABBBCCC add/sub register/immediate
-h00011:	test	ah, 4		; is this register or immediate?
+h00011:	test	ax, 0x0400	; is this register or immediate?
 	jnz	h000111
 
 	; 0001100AAABBBCCC ADDS Rd, Rn, Rm
@@ -547,7 +547,7 @@ h00011:	test	ah, 4		; is this register or immediate?
 	mov	bx, cx		; need BX to form an address
 	mov	cx, [si]	; DX:CX = Rn
 	mov	dx, [si+hi]
-	test	ah, 2		; is this ADDS or SUBS?
+	test	ax, 0x0200	; is this ADDS or SUBS?
 	jnz	.subs
 	add	cx, [bx]	; DX:CX = Rn + Rm
 	adc	dx, [bx+hi]
@@ -563,8 +563,8 @@ h00011:	test	ah, 4		; is this register or immediate?
 
 	; 0001110AAABBBCCC ADDS Rd, Rn, #imm3
 	; 0001111AAABBBCCC SUBS Rd, Rn, #imm3
-h000111:and	cx, 7		; CX = #imm3
-	test	ah, 2		; is this ADDS or SUBS?
+h000111:and	cx, 0x07	; CX = #imm3
+	test	ax, 0x0200	; is this ADDS or SUBS?
 	jnz	.subs
 	xor	ax, ax
 	add	cx, [si]	; AX:CX = Rn + #imm3
@@ -632,9 +632,9 @@ h00111:	sub	[di], ax	; Rd -= AX
 	; 01001BBBCCCCCCCC LDR Rd, [PC, #imm8]
 h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 	mov	si, [bp+oprB]	; SI = &Rm
-	test	ah, 0x08	; is this LDR Rd, [PC, #imm8]?
+	test	ax, 0x0800	; is this LDR Rd, [PC, #imm8]?
 	jnz	.ldr
-	test	ah, 0x04	; else, is this special data processing?
+	test	ax, 0x0400	; else, is this special data processing?
 	jnz	.sdp		; otherwise, it's data-processing register
 	mov	[bp+zsreg], di	; set flags according to Rdn
 	mov	bx, [bp+oprA]	; BX = 0000AAAA
@@ -1087,7 +1087,7 @@ h1001:	push	ax		; remember the instruction
 	; 10100BBBCCCCCCCC ADD Rd, PC, #imm8 (ADR Rd, label)
 	; 10101BBBCCCCCCCC ADD Rd, SP, #imm8
 h1010:	mov	di, [bp+oprB]	; di = &Rd
-	test	ah, 0x8		; is this ADD Rd, SP, #imm8?
+	test	ax, 0x0800	; is this ADD Rd, SP, #imm8?
 	jnz	.sp		; if not, this is ADD Rd, PC, #imm8
 	call	fixRd		; fix up flags to Rd if needed
 	mov	ax, 2		; DX:AX = 2
@@ -1118,7 +1118,7 @@ h1011:	mov	bl, ah		; BL = 1011XXXX
 	; 101100000AAAAAAA ADD SP, SP, #imm7
 	; 101100001AAAAAAA SUB SP, SP, #imm7
 h10110000:
-	xor	ah, ah		; AX = 00000000XAAAAAAA
+	mov	ah, 0		; AX = 00000000XAAAAAAA
 	shl	al, 1		; AX = 00000000AAAAAAA0, CF = ADD/SUB
 	jc	.sub
 	shl	ax, 1		; AX = #imm7 (in words)
@@ -1232,8 +1232,8 @@ h10110110:
 h10110111:
 	cmp	al, B7max	; is this a valid escape hatch opcode?
 	ja	.ud		; if not, treat as undefined instruction
-	xchg	ax, bx		; BL = operation code
-	xor	bh, bh		; BX = operation code
+	mov	ah, 0		; AX = operation code
+	xchg	ax, bx		; BX = operation code
 	shl	bl, 1		; form table index
 	jmp	[htB7+bx]
 .ud:	jmp	undefined	; treat as undefined instruction
@@ -1323,7 +1323,7 @@ h10111110:
 	; 1011111100110000 WFI
 	; 1011111101000000 SEV
 h10111111:
-	test	al, 0xf		; is this IT?
+	test	al, 0x0f	; is this IT?
 	je	.it		; if yes, generate UNDEFINED
 	ret			; else, treat as NOP
 .it:	jmp	undefined	; generate an undefined instruction exception
@@ -1499,7 +1499,7 @@ h1101xxxx:
 
 	; 11100CCCCCCCCCCC B #imm11
 	; 11101XXXXXXXXXXX 32-bit instructions
-h1110:	test	ah, 0x08	; is this B #imm11?
+h1110:	test	ax, 0x0800	; is this B #imm11?
 	jnz	.udf		; or is it a 32 bit instruction?
 	mov	cl, 5		; sign extend #imm11 into AX
 	shl	ax, cl		; AX=CCCCCCCCCCC00000
@@ -1540,10 +1540,10 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 	shl	dx, 1		; DX = SBBBBBBBBBB00000
 	mov	cl, 9
 	shr	dx, cl		; DX = SSSSSSSSSSBBBBBB
-	test	ah, 0x10	; is J1 set?
+	test	ax, 0x1000	; is J1 set?
 	jnz	.j1
 	xor	dl, 0x40	; DX = SSSSSSSSSyBBBBBB
-.j1:	test	ah, 0x20	; is J2 set?
+.j1:	test	ax, 0x2000	; is J2 set?
 	jnz	.j2
 	xor	dl, 0x80	; DX = SSSSSSSSxyBBBBBB, xy = ~SS^JJ
 .j2:	add	rlo(15), bx	; PC += #imm24:0
@@ -2116,3 +2116,4 @@ errors	dw	.E00, .E01, .E02, .E03, .E04, .E05, .E06, .E07
 .E12	db	"no more files",0
 
 colsp	db	": ",0
+
