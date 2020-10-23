@@ -1328,8 +1328,6 @@ h10111111:
 	ret			; else, treat as NOP
 .it:	jmp	undefined	; generate an undefined instruction exception
 
-	; 11000AAABBBBBBBB STMIA Rn!, {...}
-	; 11001AAABBBBBBBB LDMIA Rn!, {...}
 h1100:	push	ax		; remember the instruction on the stack
 	xchg	ax, di		; and in DI
 	call	fixflags	; fix flags unconditionally as it is too
@@ -1340,10 +1338,11 @@ h1100:	push	ax		; remember the instruction on the stack
 	mov	cx, [si]
 	test	di, 0x0800	; is this a load or is it a store?
 	lea	di, rlo(0)	; DI = &R0
-	jnz	.ldmia
+	jnz	h11001
+	; fall through to h11000
 
-.stmia:	shr	byte [bp+oprC], 1 ; advance bit-mask to next register
-	ja	.stfin		; any registers left (CF != 0 or ZF != 0)?
+	; 11000AAABBBBBBBB STMIA Rn!, {...}
+h11000:	shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	jnc	.nostr		; store the current register?
 	push	ax		; remember the current address
 	push	cx
@@ -1352,17 +1351,18 @@ h1100:	push	ax		; remember the instruction on the stack
 	pop	ax
 	add	ax, 4		; advance address by 4
 	adc	cx, 0
-.nostr:	add	di, 4		; advance to next register
-	jmp	.stmia
-.stfin:	pop	di		; DI = &Rn
+.iter:	add	di, 4		; advance to next register
+	jmp	h11000
+.nostr:	jnz	.iter		; want to store further registers?
+	pop	di		; DI = &Rn
 	stosw			; Rn = CX:AX
 	mov	[di], cx
 	inc	sp		; advance past instruction copy
 	inc	sp
 	ret
 
-.ldmia: shr	byte [bp+oprC], 1 ; advance bit-mask to next register
-	ja	.ldfin		; any registers left (CF != 0 or ZF != 0)?
+	; 11001AAABBBBBBBB LDMIA Rn!, {...}
+h11001: shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	jnc	.noldr		; store the current register?
 	push	ax		; remember the current address
 	push	cx
@@ -1371,9 +1371,10 @@ h1100:	push	ax		; remember the instruction on the stack
 	pop	ax
 	add	ax, 4		; advance address by 4
 	adc	cx, 0
-.noldr:	add	di, 4		; advance to next register
-	jmp	.ldmia
-.ldfin:	pop	di		; DI = &Rn
+.iter:	add	di, 4		; advance to next register
+	jmp	h11001
+.noldr:	jnz	.iter		; want to load further registers?
+	pop	di		; DI = &Rn
 	mov	dx, cx		; DX:AX = final address
 	pop	cx		; restore instruction
 	xchg	cl, ch		; extract field AAA
