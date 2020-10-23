@@ -1194,6 +1194,7 @@ h10110011 equ	undefined
 	; 10110100BBBBBBBB PUSH {...}
 	; 10110101BBBBBBBB PUSH {..., LR}
 h1011010:
+	mov	[bp+oprC], al	; remember register set
 	test	ax, 0x0100	; want to push LR?
 	mov	ax, rlo(13)	; CX:AX = SP
 	mov	cx, rhi(13)
@@ -1208,7 +1209,6 @@ h1011010:
 	pop	ax
 .nolr:	lea	di, rlo(7)	; DI = &R7
 .loop:	shl	byte [bp+oprC], 1 ; advance bit-mask to next register
-	ja	.done		; any registers left (CF != 0 or ZF != 0)?
 	jnc	.nostr		; store current register?
 	sub	ax, 4		; CX:AX -= 4
 	sbb	cx, 0
@@ -1217,9 +1217,10 @@ h1011010:
 	call	str		; deposit register into memory
 	pop	cx
 	pop	ax
-.nostr:	sub	di, 4		; advance to next register
+.iter:	sub	di, 4		; advance to next register
 	jmp	.loop		; and try again if any registers are left
-.done:	mov	rlo(13), ax	; write back SP
+.nostr:	jnz	.iter		; any registers left to push?
+	mov	rlo(13), ax	; write back SP
 	mov	rhi(13), cx
 	ret
 
@@ -1279,13 +1280,12 @@ h10111011 equ	undefined
 	; 10111100AAAAAAAA POP {...}
 	; 10111101AAAAAAAA POP {..., PC}
 h1011110:
-	push	ax		; remember the instruction
+	mov	[bp+oprC], ax	; remember the instruction
 	call	fixflags	; fix flags (easier than checking for each reg)
 	mov	ax, rlo(13)	; CX:AX = SP
 	mov	cx, rhi(13)
 	lea	di, rlo(0)	; DI = &R0
 .loop:	shr	byte [bp+oprC], 1 ; advance bit-mask to next register
-	ja	.done		; any registers left (CF != 0 or ZF != 0)?
 	jnc	.noldr		; store current register?
 	push	ax		; preserve CX:AX around ldr call
 	push	cx
@@ -1294,10 +1294,10 @@ h1011110:
 	pop	ax
 	add	ax, 4		; CX:AX += 4
 	adc	cx, 0
-.noldr:	add	di, 4		; advance to next register
+.iter:	add	di, 4		; advance to next register
 	jmp	.loop		; and try again if any registers are left
-.done:	pop	dx		; restore the instruction
-	test	dh, 0x01	; load PC?
+.noldr:	jnz	.iter		; any registers left to pop?
+	test	byte [bp+oprC+1], 0x01 ; load PC?
 	jz	.nopc
 	lea	di, rlo(15)	; DI = &PC
 	push	ax		; preserve CX:AX around ldr call
@@ -1539,7 +1539,7 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 	or	bh, dl		; BX = BBBBAAAAAAAAAAA0
 	shl	dx, 1		; DX = SBBBBBBBBBB00000
 	mov	cl, 9
-	shr	dx, cl		; DX = SSSSSSSSSSBBBBBB
+	sar	dx, cl		; DX = SSSSSSSSSSBBBBBB
 	test	ax, 0x1000	; is J1 set?
 	jnz	.j1
 	xor	dl, 0x40	; DX = SSSSSSSSSyBBBBBB
