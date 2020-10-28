@@ -1313,7 +1313,8 @@ h1011110:
 
 	; 10111110AAAAAAAA BKPT #imm8
 h10111110:
-	todo
+	int3			; issue a host break point with immediate in AL
+	ret
 
 	; hint instructions
 	; 10111111XXXXYYYY (IT) where YYYY != 0000

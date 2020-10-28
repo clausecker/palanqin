@@ -14,6 +14,7 @@ Currently implemented instructions:
     B     label
     B<c>  label
     BICS  Rd, Rm
+    BKPT  #imm8
     BL    label
     BLX   Rm
     BX    Rm
