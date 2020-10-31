@@ -354,22 +354,21 @@ rimm8:	xor	cx, cx
 	; decode handler for reg / reg / reg
 	; instruction layout: XXXXXXXAAABBBCCC
 rrr:	mov	cx, ax		; CX = XXXX XXXA AABB BCCC
-	shl	ax, 1		; CX = XXXX XXAA ABBB CCC0
-	shl	ax, 1		; CX = XXXX XAAA BBBC CC00
-	and	ax, dx		; CX = 0000 0000 000C CC00
+	shl	ax, 1		; AX = XXXX XXAA ABBB CCC0
+	shl	ax, 1		; AX = XXXX XAAA BBBC CC00
+	and	ax, dx		; AX = 0000 0000 000C CC00
 	add	ax, si		; AX = &regs[C]
 	stosw			; oprC = &regs[C]
+	shr	cx, 1		; CX = 0XXX XXXX AAAB BBCC
 	mov	ax, cx
-	shr	ax, 1		; CX = 0XXX XXXX AAAB BBCC
-	mov	cx, ax
-	and	ax, dx		; CX = 0000 0000 000B BB00
-	add	ax, si		; CX = &regs[B]
+	and	ax, dx		; AX = 0000 0000 000B BB00
+	add	ax, si		; AX = &regs[B]
 	stosw			; oprB = &regs[B]
 	xchg	ax, cx
 	mov	cl, 3		; prepare shift amount
-	shr	ax, cl		; CX = 0000 XXXX 000A AABB
-	and	ax, dx		; CX = 0000 0000 000A AA00
-	add	ax, si		; CX = &regs[A]
+	shr	ax, cl		; AX = 0000 XXXX 000A AABB
+	and	ax, dx		; AX = 0000 0000 000A AA00
+	add	ax, si		; AX = &regs[A]
 	stosw			; oprA = &regs[A]
 	ret
 
