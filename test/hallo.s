@@ -10,6 +10,14 @@ _start:	bl	hell
 	adr	r1, string
 	bl	puts
 	bl	indexd
+	adr	r1, crlf
+	bl	puts
+	sub	sp, #20
+	mov	r1, sp
+	stmia	r1!, {r3-r7}
+	subs	r1, #20
+	bl	puts
+	add	sp, #20
 	bye
 
 hell:	ldr	r0, =0x6c6c6548	@ 'Hell'
@@ -69,8 +77,11 @@ indexd:	movs	r0, #0
 	bpl	0b		@ iterate until whole string reversed
 	mov	r1, sp
 	bl	puts
-	pop	{r0-r4, pc}	@ pop string off stack and return
+	pop	{r3-r7, pc}	@ pop string off stack and return
 
 	.balign	4
 string:	.string	"\r\nJedem Anfang wohnt ein Zauber inne.\r\n"
+	.balign 4
+crlf:	.string "\r\n"
+	.balign 4
 tapete:	.ascii "0123456789abcdef"
