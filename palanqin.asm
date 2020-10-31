@@ -529,9 +529,6 @@ h000:	mov	bl, ah		; BL = 000XXAAA
 	jmp	[ht000XX+bx]
 
 	; 0000000000BBBCCC MOVS Rd, Rm
-	; 01000110CBBBBCCC MOV Rd, Rm
-h01000110:
-	call	fixRd		; fix flags if needed
 h0000000000:
 	movsw			; Rd = Rm
 	movsw
@@ -639,6 +636,7 @@ h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 .sdp:	mov	bl, ah		; BL = 010001AA
 	and	bx, 0x03	; BX = 000000AA
 	shl	bx, 1		; BX = 00000AA0
+	lea	cx, rlo(15)	; CX = &PC
 	jmp	[ht010001XX+bx]
 	; 01001BBBCCCCCCCC LDR Rt, [PC, #imm8]
 .ldr:	xchg	di, si		; set up DI = &Rt, SI = #imm8
@@ -977,12 +975,26 @@ h01000100:
 	add	[di], ax	; Rd(lo) += Rm(lo)
 	lodsw			; AX = Rm(hi)
 	adc	[di+hi], ax	; Rd(hi) += Rm(hi) + C
-	ret
+	cmp	di, cx		; is DI = &PC?
+	jne	.ret
+	or	byte [di], 1	; set thumb bit
+.ret:	ret
+
+	; 01000110CBBBBCCC MOV Rd, Rm
+h01000110:
+	call	fixRd		; fix flags if needed
+	movsw			; Rd = Rm
+	movsw
+	sub	di, 4		; restore DI
+	cmp	di, cx		; is DI == PC?
+	jne	.ret
+	or	byte [di], 1	; if yes, set thumb bit
+.ret:	ret
 
 	; 010001110BBBBXXX BX Rm
 	; 010001111BBBBXXX BLX Rm
 h01000111:
-	lea	di, rlo(15)	; DI = &PC
+	mov	di, cx		; DI = &PC
 	test	al, 0x80	; is this BLX?
 	jnz	.blx
 	movsw			; PC = Rm
