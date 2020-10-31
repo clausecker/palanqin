@@ -564,19 +564,16 @@ h00011:	test	ax, 0x0400	; is this register or immediate?
 	; 0001111AAABBBCCC SUBS Rd, Rn, #imm3
 h000111:and	cx, 0x07	; CX = #imm3
 	test	ax, 0x0200	; is this ADDS or SUBS?
+	lodsw			; DX:AX = Rn
+	mov	dx, [si]
 	jnz	.subs
-	xor	ax, ax
-	add	cx, [si]	; AX:CX = Rn + #imm3
-	adc	ax, [si+hi]
+	add	ax, cx		; DX:AX = Rn + #imm3
+	adc	dx, 0
 	jmp	.fi
-.subs:	lodsw			; AX:DX = Rn
-	xchg	ax, dx
-	lodsw
-	sub	dx, cx		; AX:DX = Rn - #imm3
-	sbb	ax, 0
+.subs:	sub	ax, cx		; AX:DX = Rn - #imm3
+	sbb	dx, 0
 	cmc			; adjust CF to ARM conventions
-.fi:	xchg	ax, dx		; DX:AX = AX:DX
-	stosw			; Rd = DX:AX
+.fi:	stosw			; Rd = DX:AX
 	mov	[di], dx
 	pushf			; remember all flags
 	pop	word [bp+flags]
