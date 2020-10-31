@@ -7,7 +7,9 @@
 _start:	bl	hell
 	bl	o_wo
 	bl	rld
-	bl	rest
+	adr	r1, string
+	bl	puts
+	bl	indexd
 	bye
 
 hell:	ldr	r0, =0x6c6c6548	@ 'Hell'
@@ -45,14 +47,30 @@ rld:	ldr	r0, =0x21646c72	@ 'rld!'
 	bx	lr
 
 	@ print a string using a loop
-rest:	adr	r1, string
-0:	ldrb	r0, [r1]
+puts:	ldrb	r0, [r1]
 	adds	r1, r1, #1
 	cmp	r0, #0
 	beq	1f
 	emit
-	b	0b
+	b	puts
 1:	bx	lr
 
+	@ print a test pattern using a [Rn, Rm] addressing mode
+indexd:	movs	r0, #0
+	push	{r0, lr}	@ push end of string and LR
+	sub	sp, sp, #16	@ make space on the stack
+	adr	r4, tapete
+	movs	r1, #15
+	mov	r2, sp
+0:	ldrb	r3, [r4, r1]
+	strb	r3, [r2, r0]
+	adds	r0, r0, #1
+	subs	r1, r1, #1
+	bpl	0b		@ iterate until whole string reversed
+	mov	r1, sp
+	bl	puts
+	pop	{r0-r4, pc}	@ pop string off stack and return
+
 	.balign	4
-string:	.string	"\r\nJedem Anfang wohnt ein Zauber inne."
+string:	.string	"\r\nJedem Anfang wohnt ein Zauber inne.\r\n"
+tapete:	.ascii "0123456789abcdef"
