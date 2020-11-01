@@ -607,7 +607,7 @@ h00101:	mov	dx, [di+hi]
 
 	; 00110BBBCCCCCCCC ADDS Rd, #imm8
 h00110:	add	[di], ax	; Rd += AX
-	add	[di+hi], si
+	adc	[di+hi], si
 	pushf			; remember flags
 	pop	word [bp+flags]
 	ret
