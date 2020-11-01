@@ -1,13 +1,14 @@
-ARM Cortex M0 emulator for DOS
+Palanqin, an ARM Cortex M0 emulator for DOS
 
-Register contents on reset:
+This softwa
+
+
+# Register contents on reset:
 
 R0:  program image base address
 R1:  memory size
 SP: value taken from the vector table
 PC: value taken from the vector table
-
-Ctrl+Break sends an NMI (not implemented yet)
 
 # Memory map
 
@@ -24,6 +25,9 @@ emulator stack space and extends all the way to the end of the program.
 Address translation is performed by the emulator such that emulated
 addresses 0x00000000 seen by ARM code corresponds to the load address
 of the program.
+
+The PPB and escape hatches aren't implemented yet.  This memory map is
+subject to change.
 
 # Escape hatches:
 

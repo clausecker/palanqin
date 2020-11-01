@@ -89,5 +89,6 @@ Currently implemented escape hatches:
 Other items to be done:
 
  - check if there is sufficient memory before loading the image.
- - keep a pointer to the emulator state in bp for shorter encodings
-   and to free the ds register.
+ - provide more escape hatches and functionality to interact with the host
+ - implement interrupt handlinig
+ - implement basic ARM peripherals
