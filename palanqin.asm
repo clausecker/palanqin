@@ -1002,10 +1002,8 @@ h01000111:
 	test	byte rlo(15), 1	; is the thumb bit set?
 	jz	.arm
 .ret:	ret
-.blx:	lodsw			; DX:AX = PC
-	mov	dx, [di]
-	dec	di		; DI = &PC
-	dec	di
+.blx:	mov	ax, [di]	; DX:AX = PC
+	mov	dx, [di+2]	;
 	movsw			; PC = Rm
 	movsw
 	mov	rlo(14), ax	; LR = DX:AX
