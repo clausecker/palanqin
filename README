@@ -1,7 +1,11 @@
 Palanqin, an ARM Cortex M0 emulator for DOS
 
-This softwa
+Copyright (c) 2020, Robert Clausecker <fuz@fuz.su>
 
+This software is in alpha state.  It is not ready for use and the only
+program known to work with it is Mecrisp Stellaris in the upcoming
+2.5.4b release.  All of its aspects are subject to change and cannot be
+expected to remain stable.
 
 # Register contents on reset:
 
