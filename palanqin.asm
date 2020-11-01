@@ -245,7 +245,7 @@ state	resb	st_size		; BP points here
 ifetch:	strhi	cx, 15		; high part of PC for translation
 	call	translate	; BX: handler, CX:AX: address
 	strlo	si, 15		; CX:SI = translated address
-	and	si, ~1		; clear thumb bit
+	dec	si		; clear thumb bit
 	add	word rlo(15), 2	; PC += 2
 	adc	word rhi(15), 0
 	jmp	[bx+mem.ldrh]	; AX = instruction, tail call
@@ -491,7 +491,7 @@ ht1011XXXX:
 	dw	h10111010	; REV/REV16/REVSH
 	dw	h10111011	; (CBNZ Rn, #imm5)
 	dw	h1011110	; POP {...}
-	dw	h1011110	; POP {..., LR}
+	dw	h1011110	; POP {..., PC}
 	dw	h10111110	; BKPT #imm8
 	dw	h10111111	; (IT), hints
 
@@ -976,7 +976,7 @@ h01000100:
 	adc	[di+hi], ax	; Rd(hi) += Rm(hi) + C
 	cmp	di, cx		; is DI = &PC?
 	jne	.ret
-	or	byte [di], 1	; set thumb bit
+	or	byte [di], 1	; if yes, set thumb bit
 .ret:	ret
 
 	; 01000110CBBBBCCC MOV Rd, Rm
@@ -985,7 +985,7 @@ h01000110:
 	movsw			; Rd = Rm
 	movsw
 	sub	di, 4		; restore DI
-	cmp	di, cx		; is DI == PC?
+	cmp	di, cx		; is DI = &PC?
 	jne	.ret
 	or	byte [di], 1	; if yes, set thumb bit
 .ret:	ret
@@ -1314,7 +1314,10 @@ h1011110:
 	adc	cx, 0
 .nopc:	mov	rlo(13), ax	; write back SP
 	mov	rhi(13), cx
+	test	byte rlo(15), 1	; is the thumb bit set?
+	jz	.arm
 	ret
+.arm:	jmp	undefined
 
 	; 10111110AAAAAAAA BKPT #imm8
 h10111110:
