@@ -322,17 +322,16 @@ d0001:	mov	cx, ax		; make a copy of insn
 imm5rr:	mov	cx, ax		; CX = XXXX XAAA AABB BCCC
 	shl	ax, 1		; AX = XXXX AAAA ABBB CCC0
 	shl	ax, 1		; AX = XXXA AAAA BBBC CC00
+	mov	ch, ah		; CX = XXXA AAAA **BB BCCC
 	and	ax, dx		; AX = 0000 0000 000C CC00
 	add	ax, si		; AX = &regs[C]
 	stosw			; oprC = &regs[C]
-	shr	cx, 1		; AX = 0XXX XXAA AAAB BBCC
+	shr	cl, 1		; CX = XXXA AAAA 0**B BBCC
 	mov	ax, cx
 	and	ax, dx		; AX = 0000 0000 000B BB00
 	add	ax, si		; AX == &regs[B]
 	stosw			; oprB = &regs[B]
-	xchg	ax, cx		; AX = 0XXX XXAA AAAB BBCC
-	mov	cl, 5		; prepare shift amount
-	shr	ax, cl		; AX = 0000 00XX XXXA AAAA
+	mov	al, ch		; AL = XXXA AAAA
 	and	ax, 0x1f	; AX = 0000 0000 000A AAAA
 	stosw			; oprA = A
 	ret
