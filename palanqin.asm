@@ -32,6 +32,18 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 	ret
 %endmacro
 
+	; compare DI with [bp+zsreg].  If both are equal, fix the flags.
+	; trashes AX, BX, and DX.  Preserves DI which may not be zero.
+	; the intent is to save the flags if Rd == [bp+zsreg] and flag
+	; recovery would otherwise be impossible.
+%macro	fixRd	0
+	mov	bx, [bp+zsreg]
+	cmp	bx, di		; is Rd == [bp+zsreg]?
+	jne	%%nofix
+	call	fixflags.entry	; if yes, fix it up
+%%nofix:
+%endmacro
+
 	; 8086 flags (those we find useful)
 CF	equ	0x0001
 ZF	equ	0x0040
@@ -615,11 +627,10 @@ h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 .sdp:	mov	bl, ah		; BL = 010001AA
 	and	bx, 0x03	; BX = 000000AA
 	shl	bx, 1		; BX = 00000AA0
-	lea	cx, rlo(15)	; CX = &PC
 	jmp	[ht010001XX+bx]
 	; 01001BBBCCCCCCCC LDR Rt, [PC, #imm8]
 .ldr:	xchg	di, si		; set up DI = &Rt, SI = #imm8
-	call	fixRd		; set flags on Rd if needed
+	fixRd			; set flags on Rd if needed
 	mov	ax, rlo(15)	; AX = R15(lo)
 	shl	si, 1		; SI = #imm8 << 2 + 2
 	inc	si
@@ -949,31 +960,27 @@ h0100001111:
 
 	; ADD Rd, Rm
 h01000100:
-	call	fixRd		; fix flags if needed
+	fixRd			; fix flags if needed
 	lodsw			; AX = Rm(lo)
 	add	[di], ax	; Rd(lo) += Rm(lo)
 	lodsw			; AX = Rm(hi)
 	adc	[di+hi], ax	; Rd(hi) += Rm(hi) + C
-	cmp	di, cx		; is DI = &PC?
-	jne	.ret
-	or	byte [di], 1	; if yes, set thumb bit
-.ret:	ret
+	or	byte rlo(15), 1	; make sure thumb bit is not cleared
+	ret
 
 	; 01000110CBBBBCCC MOV Rd, Rm
 h01000110:
-	call	fixRd		; fix flags if needed
+	fixRd			; fix flags if needed
 	movsw			; Rd = Rm
 	movsw
 	sub	di, 4		; restore DI
-	cmp	di, cx		; is DI = &PC?
-	jne	.ret
-	or	byte [di], 1	; if yes, set thumb bit
-.ret:	ret
+	or	byte rlo(15), 1	; make sure thumb bit is not cleared
+	ret
 
 	; 010001110BBBBXXX BX Rm
 	; 010001111BBBBXXX BLX Rm
 h01000111:
-	mov	di, cx		; DI = &PC
+	lea	di, rlo(15)	; DI = &PC
 	test	al, 0x80	; is this BLX?
 	jnz	.blx
 	movsw			; PC = Rm
@@ -992,17 +999,19 @@ h01000111:
 .arm:	jmp	undefined
 
 	; 0101XXXAAABBBCCC load/store register offset
-h0101:	mov	bl, ah		; BL = 0101XXXA
-	and	bx, 0x0e	; BL = 0000XXX0
+h0101:	mov	al, ah		; AL = 0101XXXA
+	and	ax, 0x0e	; AX = 0000XXX0
+	push	ax		; remember for later
 	mov	di, [bp+oprC]	; DI = &Rt
-	call	fixRd		; fix flags for Rt
+	fixRd			; fix flags for Rt
 	mov	si, [bp+oprB]	; SI = &Rn
 	lodsw			; CX:AX = Rn
 	mov	cx, [si]
 	mov	si, [bp+oprA]	; SI = &rm
 	add	ax, [si]	; CX:AX = Rn + Rm
 	adc	cx, [si+hi]
-	jmp	[ht0101+bx]	; perform instruction behaviour
+	pop	bx		; BX = 0000XXX0
+	jmp	[ht0101+bx]	; perform instruction behavior
 
 	; 01100AAAAABBBCCC STR	Rt, [Rn, #imm5]
 	; 01110AAAAABBBCCC STRB Rt, [Rn, #imm5]
@@ -1011,7 +1020,7 @@ h0101:	mov	bl, ah		; BL = 0101XXXA
 h011:	mov	si, [bp+oprB]	; SI = &Rn
 	mov	di, [bp+oprC]	; DI = &Rt
 	push	ax		; remember the instruction
-	call	fixRd		; fix flags on Rt
+	fixRd			; fix flags on Rt
 	pop	dx		; DX = instruction
 	mov	bx, [bp+oprA]	; BX = #imm5
 	lodsw			; CX:AX = Rn
@@ -1038,7 +1047,7 @@ h011:	mov	si, [bp+oprB]	; SI = &Rn
 h1000:	mov	si, [bp+oprB]	; SI = &Rn
 	mov	di, [bp+oprC]	; DI = &Rt
 	push	ax		; remember the instruction
-	call	fixRd		; fix flags on Rt
+	fixRd			; fix flags on Rt
 	pop	dx		; and restore it to DX
 	mov	bx, [bp+oprA]	; BX = #imm5
 	shl	bx, 1		; BX = #imm5 << 1
@@ -1055,7 +1064,7 @@ h1000:	mov	si, [bp+oprB]	; SI = &Rn
 	; 10011BBBCCCCCCCC LDR Rd, [SP, #imm8]
 h1001:	push	ax		; remember the instruction
 	mov	di, [bp+oprB]	; DI = &Rt
-	call	fixRd
+	fixRd
 	pop	dx		; DX = instruction
 	xor	ax, ax
 	mov	al, [bp+oprC]	; AX = #imm8
@@ -1072,19 +1081,19 @@ h1001:	push	ax		; remember the instruction
 	; 10100BBBCCCCCCCC ADD Rd, PC, #imm8 (ADR Rd, label)
 	; 10101BBBCCCCCCCC ADD Rd, SP, #imm8
 h1010:	mov	di, [bp+oprB]	; di = &Rd
-	test	ax, 0x0800	; is this ADD Rd, SP, #imm8?
+	xchg	cx, ax		; save instruction around fixRd
+	fixRd			; fix up flags to Rd if needed
+	test	ch, 0x08	; is this ADD Rd, SP, #imm8?
 	jnz	.sp		; if not, this is ADD Rd, PC, #imm8
-	call	fixRd		; fix up flags to Rd if needed
 	mov	ax, 2		; DX:AX = 2
 	cwd
 	add	ax, rlo(15)	; DX:AX = R15 + 2
 	adc	dx, rhi(15)
 	and	al, ~3		; aligned to word boundary
 	jmp	.fi
-.sp:	call	fixRd		; fix up flags to Rd if needed
-	mov	ax, rlo(13)	; load SP into DX:AX
+.sp:	mov	ax, rlo(13)	; load SP into DX:AX
 	mov	dx, rhi(13)
-.fi:	mov	cx, [bp+oprC]	; CX = #imm8 >> 2
+.fi:	xor	ch, ch		; CX = #imm8 >> 2
 	shl	cx, 1
 	shl	cx, 1		; CX = #imm8
 	add	ax, cx		; DX:AX == DX:AX + CX (= PC/SP + #imm8)
@@ -1137,15 +1146,17 @@ h10110010:
 
 	shr	ax, 1		; AX = 0### #### XXXB BBCC
 	mov	bx, ax
-	and	ax, dx		; AX = 0000 0000 000B BB00
-	add	si, ax		; SI = &regs[B]
+	and	bx, dx		; BX = 0000 0000 000B BB00
+	add	si, bx		; SI = &regs[B]
 
 	mov	cl, 4
-	shr	bx, cl		; BX = 0000 0### #### XXXB
-	and	bx, 0xe		; BX = 0000 0000 0000 XXX0
-	call	fixRd		; set flags on Rd if needed
+	shr	ax, cl		; AX = 0000 0### #### XXXB
+	and	ax, 0xe		; AX = 0000 0000 0000 XXX0
+	push	ax		; save AX around fixRd
+	fixRd			; set flags on Rd if needed
 	lodsw			; AX = Rm(lo), SI += 2
-	jmp	[htB2BA+bx]	; jump to instruction handler
+	pop	bx		; BX = 0000 XXX0
+	jmp	[htB2BA+bx]	; perform instruction handler
 
 	; 1011001000AAABBB SXTH Rd, Rm
 hB200:	cwd			; DX:AX = SXTH(Rm(lo))
@@ -1379,8 +1390,8 @@ h11001: shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	; 1101BBBBCCCCCCCC B<c> <label>
 	; 11011110CCCCCCCC UDF #imm8
 	; 11011111CCCCCCCC SVC #imm8
-h1101:	mov	bl, ah		; BL = 1101AAAA
-	xchg	bx, ax		; BX = insn, AL = 1101AAAA
+h1101:	mov	cl, ah		; CL = 1101AAAA
+	xchg	cx, ax		; CX = insn, AL = 1101AAAA
 	shl	al, 1		; AL = 101AAAA0
 	shl	al, 1		; AL = 01AAAA00
 	cbw			; AX = 01AAAA00
@@ -1474,7 +1485,7 @@ h1101xxxx:
 	align	4, int3
 	jmp	.svc
 
-.taken:	xchg	ax, bx		; AL = #imm8
+.taken:	xchg	ax, cx		; AL = #imm8
 	cbw			; AX = #imm8
 	inc	ax		; AX = #imm8 + 1
 	shl	ax, 1		; AX = #imm8:0 + 2
@@ -1581,17 +1592,16 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	; set ZF and SF in flags according to zsreg
-	; trashes AX and DX.
+	; trashes AX, BX, and DX.
 fixflags:
-	push	si		; preserve SI
-	mov	si, [bp+zsreg]
-	test	si, si		; flags already fixed?
+	mov	bx, [bp+zsreg]
+	test	bx, bx		; flags already fixed?
 	jz	.nofix
 .entry:	xor	dx, dx
-	cmp	[si], dx	; set ZF according to R(lo)
+	cmp	[bx], dx	; set ZF according to R(lo)
 	lahf
 	mov	al, ah		; AL = R(lo) flags
-	cmp	[si+hi], dx	; set ZF according to R(hi)
+	cmp	[bx+hi], dx	; set ZF according to R(hi)
 	lahf
 	or	al, ~ZF		; isolate ZF in AL
 	and	ah, al		; AH = SF, ZF according to R
@@ -1602,19 +1612,7 @@ fixflags:
 	or	al, ah		; merge the two
 	mov	[bp+flags], al	; write them back
 	mov	[bp+zsreg], dx	; and mark the flags as being fixed
-.nofix:	pop	si		; restore SI
-	ret
-
-	; compare DI with [bp+zsreg].  If both are equal, fix the flags.
-	; trashes AX, DX.  Preserves DI which may not be zero.
-	; the intent is to save the flags if Rd == [bp+zsreg] and flag
-	; recovery would otherwise be impossible.
-fixRd:	push	si		; preserve SI
-	mov	si, [bp+zsreg]
-	cmp	si, di		; is Rd == [bp+zsreg]?
-	je	fixflags.entry	; if yes, fix it up
-	pop	si		; otherwise restore SI and return
-	ret
+.nofix:	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Memory Access                                                              ;;
