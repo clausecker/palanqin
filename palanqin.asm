@@ -688,8 +688,8 @@ h00000:	cmp	cl, 16		; shift by more than 16?
 	shl	si, cl		; SI = Rm(hi) << #imm5
 	lahf			; update CF in flags
 	mov	[bp+flags], ah
-	sub	cl, 16		; CL = 16 - CL
-	neg	cl
+	dec	cx		; CL = 16 - CL
+	xor	cx, 15
 	shr	bx, cl		; BX = Rm(lo) >> 16 - #imm5
 	lea	ax, [bx+si]	; AX = Rm(hi) << #imm5 | Rm(lo) >> 16 - #imm5
 	stosw			; Rd(hi) = Rm << #imm5 (hi)
@@ -720,9 +720,10 @@ h00001:	cmp	cl, 16		; shift by more than 16?
 	mov	ax, [si+hi]	; AX = Rm(hi)
 	shr	ax, cl		; AX = Rm(hi) >> imm5 - 16
 	stosw			; Rd(lo) = Rm(hi) >> imm5 - 16
-	mov	word [di], 0	; Rd(hi) = 0
 	lahf			; update CF, SF, and ZF in flags
 	mov	[bp+flags], ah
+	xor	ax, ax
+	stosw			; Rd(hi) = 0
 .ret:	ret
 
 	; shift by 0 < CL <= 16
@@ -735,8 +736,8 @@ h00001:	cmp	cl, 16		; shift by more than 16?
 	mov	si, ax		; keep a copy
 	shr	si, cl		; SI = Rm(hi) >> #imm5
 	mov	[di+hi], si	; Rd(hi) = Rm(hi) >> #imm5
-	sub	cl, 16		; CL = 16 - CL
-	neg	cl
+	dec	cx		; CL = 16 - CL
+	xor	cx, 15
 	shl	ax, cl		; AX = Rm(hi) << 16 - #imm5
 	or	ax, dx		; AX = Rm(hi) << 16 - #imm5 | Rm(lo) >> #imm5
 	stosw			; Rd(lo) = Rm >> #imm5 (lo)
@@ -776,8 +777,8 @@ h00010:	cmp	cl, 16		; shift by more than 16?
 	mov	si, ax		; keep a copy
 	sar	si, cl		; SI = Rm(hi) >> #imm5
 	mov	[di+hi], si	; Rd(hi) = Rm(hi) >> #imm5
-	sub	cl, 16		; CL = 16 - CL
-	neg	cl
+	dec	cx		; CL = 16 - CL
+	xor	cx, 15
 	shl	ax, cl		; AX = Rm(hi) << 16 - #imm5
 	or	ax, dx		; AX = Rm(hi) << 16 - #imm5 | Rm(lo) >> #imm5
 	stosw			; Rd(lo) = Rm >> #imm5 (lo)
@@ -836,8 +837,8 @@ h0100000111:
 	shr	ax, cl		; AX = Rdn(lo) >> CL
 	mov	si, dx		; SI = Rdn(hi)
 	shr	si, cl		; DX = Rdn(hi) >> CL
-	sub	cl, 16		; CL = 16 - CL
-	neg	cl
+	xor	cx, 15		; CL = 16 - CL
+	inc	cx
 	shl	dx, cl		; DX = Rdn(hi) << 16 - CL
 	or	ax, dx		; AX = Rdn(lo) >> CL | Rdn(hi) << 16 - CL
 	stosw			; Rdn(lo) = Rdn ror CL (lo)
@@ -971,7 +972,6 @@ h01000110:
 	fixRd			; fix flags if needed
 	movsw			; Rd = Rm
 	movsw
-	sub	di, 4		; restore DI
 	or	byte rlo(15), 1	; make sure thumb bit is not cleared
 	ret
 
@@ -1919,7 +1919,7 @@ seglin:	mov	cl, 4
 
 	section .data
 undmsg	db	"undefined instruction "
-.insn	db	"####", 0
+.insn	db	"XXXX", 0
 
 	; print a message that an undefined instruction has occured
 	; and terminate the emulation
