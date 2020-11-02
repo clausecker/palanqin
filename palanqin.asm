@@ -540,19 +540,18 @@ h00011:	test	ax, 0x0400	; is this register or immediate?
 	; 0001100AAABBBCCC ADDS Rd, Rn, Rm
 	; 0001101AAABBBCCC SUBS Rd, Rn, Rm
 	mov	bx, cx		; need BX to form an address
-	mov	cx, [si]	; DX:CX = Rn
-	mov	dx, [si+hi]
+	mov	cx, [bx]	; DX:CX = Rm
+	mov	dx, [bx+hi]
 	test	ax, 0x0200	; is this ADDS or SUBS?
-	jnz	.subs
-	add	cx, [bx]	; DX:CX = Rn + Rm
-	adc	dx, [bx+hi]
-	jmp	.fi
-.subs:	sub	cx, [bx]	; DX:CX = Rn - Rm
-	sbb	dx, [bx+hi]
-	cmc			; adjust CF to ARM conventions
-.fi:	mov	[di], cx	; Rd = DX:CX
+	jz	.adds
+	not	cx		; complement DX:CX and set CF
+	not	dx
+	stc
+.adds:	adc	cx, [si]	; DX:CX = ADDS ? Rn + Rm : Rn - Rm
+	adc	dx, [si+hi]
+	mov	[di], cx	; Rd = DX:CX
 	mov	[di+hi], dx
-	pushf			; remember all flags
+	pushf			; remember CF and OF
 	pop	word [bp+flags]
 	ret
 
@@ -560,16 +559,15 @@ h00011:	test	ax, 0x0400	; is this register or immediate?
 	; 0001111AAABBBCCC SUBS Rd, Rn, #imm3
 h000111:and	cx, 0x07	; CX = #imm3
 	test	ax, 0x0200	; is this ADDS or SUBS?
-	lodsw			; DX:AX = Rn
-	mov	dx, [si]
-	jnz	.subs
-	add	ax, cx		; DX:AX = Rn + #imm3
-	adc	dx, 0
-	jmp	.fi
-.subs:	sub	ax, cx		; AX:DX = Rn - #imm3
-	sbb	dx, 0
-	cmc			; adjust CF to ARM conventions
-.fi:	stosw			; Rd = DX:AX
+	xchg	ax, cx		; AX = #imm3
+	cwd			; DX:AX = #imm3
+	jz	.adds
+	not	ax		; complement DX:AX and set CF
+	not	dx
+	stc
+.adds:	adc	ax, [si]	; DX:AX = ADDS ? Rn + #imm3 : Rn - #imm3
+	adc	dx, [si+hi]
+	stosw			; Rd = DX:AX
 	mov	[di], dx
 	pushf			; remember all flags
 	pop	word [bp+flags]
