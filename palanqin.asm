@@ -671,10 +671,11 @@ h00000:	cmp	cl, 16		; shift by more than 16?
 
 	; shift by 16 < CL <= 32
 	sub	cl, 16		; adjust shift amount to 0 < CL <= 16
+	xor	ax, ax		; AX = 0
+	stosw			; Rd(lo) = 0
 	lodsw			; AX = Rm(lo),
 	shl	ax, cl		; AX = Rm(lo) << imm5 - 16
-	mov	word [di], 0	; Rd(lo) = 0
-	mov	[di+hi], ax	; Rd(hi) = Rm(lo) << imm5 - 16
+	mov	[di], ax	; Rd(hi) = Rm(lo) << imm5 - 16
 	lahf			; update CF in flags
 	mov	[bp+flags], ah
 .ret:	ret
