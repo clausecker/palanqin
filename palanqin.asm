@@ -1917,10 +1917,25 @@ seglin:	mov	cl, 4
 ;; Exceptions, Events, and Interrupts                                         ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-	; generate an undefined instruction exception
+	section .data
+undmsg:	db	"undefined instruction "
+.insn:	db	"####", 0
+
+	; print a message that an undefined instruction has occured
+	; and terminate the emulation
+	; TODO: generate an undefined instruction exception
 	section	.text
 undefined:
-	todo			; TODO
+	sub	word rlo(15), 2	; roll PC back to the current instruction
+	sbb	word rhi(15), 2
+	call	hB701		; dump register contents
+	call	ifetch		; load current instruction
+	mov	di, undmsg.insn	; convert instruction to hex
+	call	tohex
+	mov	si, undmsg
+	call	puts		; print "undefined instruction ####" message
+	mov	ax, 0x4c01	; error level 1 (failure)
+	int	0x21		; 0x4c: TERMINATE PROGRAM
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Escape Hatches                                                             ;;
