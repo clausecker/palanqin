@@ -554,12 +554,11 @@ h00011:	test	ax, 0x0400	; is this register or immediate?
 h000111:and	cx, 0x07	; CX = #imm3
 	test	ax, 0x0200	; is this ADDS or SUBS?
 	xchg	ax, cx		; AX = #imm3
-	cwd			; DX:AX = #imm3
 	jz	.adds
 	not	ax		; complement DX:AX and set CF
-	not	dx
 	stc
-.adds:	adc	ax, [si]	; DX:AX = ADDS ? Rn + #imm3 : Rn - #imm3
+.adds:	cwd			; sign extend AX into DX:AX
+	adc	ax, [si]	; DX:AX = ADDS ? Rn + #imm3 : Rn - #imm3
 	adc	dx, [si+hi]
 	stosw			; Rd = DX:AX
 	mov	[di], dx
@@ -573,7 +572,7 @@ h001:	mov	bl, ah		; BL = 001XXAAA
 	and	bx, 0xc		; BL = 0000XX00
 	xor	si, si		; SI = 0
 	mov	di, [bp+oprB]	; DI = &regs[Rd]
-	mov	ah, 0		; AX = #imm8
+	xor	ah, ah		; AX = #imm8
 	mov	[bp+zsreg], di	; set SF and ZF according to Rd
 	jmp	[ht001XX+bx]	; call instruction specific handler
 
@@ -1112,7 +1111,7 @@ h1011:	mov	bl, ah		; BL = 1011XXXX
 	; 101100000AAAAAAA ADD SP, SP, #imm7
 	; 101100001AAAAAAA SUB SP, SP, #imm7
 h10110000:
-	mov	ah, 0		; AX = 00000000XAAAAAAA
+	xor	ah, ah		; AX = 00000000XAAAAAAA
 	shl	al, 1		; AX = 00000000AAAAAAA0, CF = ADD/SUB
 	jc	.sub
 	shl	ax, 1		; AX = #imm7 (in words)
@@ -1229,7 +1228,7 @@ h10110110:
 h10110111:
 	cmp	al, B7max	; is this a valid escape hatch opcode?
 	ja	.ud		; if not, treat as undefined instruction
-	mov	ah, 0		; AX = operation code
+	xor	ah, ah		; AX = operation code
 	xchg	ax, bx		; BX = operation code
 	shl	bl, 1		; form table index
 	jmp	[htB7+bx]
@@ -1995,7 +1994,7 @@ hB703:	lea	di, rlo(0)	; di = &R0
 	int	0x21		; 0x08: NO ECHO CONSOLE INPUT
 	test	al, al		; is this extended ASCII?
 	jz	.ext		; if yes, read again for ext. ASCII character
-	mov	ah, 0x00
+	xor	ah, ah
 	stosw			; R0(lo) = character
 	ret
 .ext:	int	0x21		; 0x08: NO ECHO CONSOLE INPUT
