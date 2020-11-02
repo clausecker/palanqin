@@ -37,8 +37,7 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 	; the intent is to save the flags if Rd == [bp+zsreg] and flag
 	; recovery would otherwise be impossible.
 %macro	fixRd	0
-	mov	bx, [bp+zsreg]
-	cmp	bx, di		; is Rd == [bp+zsreg]?
+	cmp	di, [bp+zsreg]	; is Rd == [bp+zsreg]?
 	jne	%%nofix
 	call	fixflags.entry	; if yes, fix it up
 %%nofix:
@@ -1595,8 +1594,12 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 fixflags:
 	mov	bx, [bp+zsreg]
 	test	bx, bx		; flags already fixed?
-	jz	.nofix
-.entry:	xor	dx, dx
+	jnz	.fix
+	ret			; if yes, there's nothing left to do
+
+	; fixRd entry point
+.entry:	mov	bx, [bp+zsreg]
+.fix:	xor	dx, dx
 	cmp	[bx], dx	; set ZF according to R(lo)
 	lahf
 	mov	al, ah		; AL = R(lo) flags
@@ -1611,7 +1614,7 @@ fixflags:
 	or	al, ah		; merge the two
 	mov	[bp+flags], al	; write them back
 	mov	[bp+zsreg], dx	; and mark the flags as being fixed
-.nofix:	ret
+	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Memory Access                                                              ;;
