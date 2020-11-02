@@ -1919,8 +1919,8 @@ seglin:	mov	cl, 4
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	section .data
-undmsg:	db	"undefined instruction "
-.insn:	db	"####", 0
+undmsg	db	"undefined instruction "
+.insn	db	"####", 0
 
 	; print a message that an undefined instruction has occured
 	; and terminate the emulation
@@ -1928,7 +1928,7 @@ undmsg:	db	"undefined instruction "
 	section	.text
 undefined:
 	sub	word rlo(15), 2	; roll PC back to the current instruction
-	sbb	word rhi(15), 2
+	sbb	word rhi(15), 0
 	call	hB701		; dump register contents
 	call	ifetch		; load current instruction
 	mov	di, undmsg.insn	; convert instruction to hex
