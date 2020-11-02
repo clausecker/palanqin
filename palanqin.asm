@@ -26,24 +26,6 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 %define	rlo(r)	[r*4+bp+regs]
 %define	rhi(r)	[r*4+bp+regs+hi]
 
-	; load value into ARM register
-%macro	ldrlo	2
-	mov	rlo(%1), %2
-%endmacro
-
-%macro	ldrhi	2
-	mov	rhi(%1), %2
-%endmacro
-
-	; store value of ARM register
-%macro	strlo	2
-	mov	%1, rlo(%2)
-%endmacro
-
-%macro	strhi	2
-	mov	%1, rhi(%2)
-%endmacro
-
 	; functionality not implemented
 %macro	todo	0
 	int3
@@ -166,16 +148,16 @@ start:	mov	sp, end+stack	; beginning of stack
 	mov	dx, bx
 	xor	ax, ax		; DX:AX contains the image base
 	call	seglin		; as a linear address
-	ldrlo	0, ax		; write load address to R0
-	ldrhi	0, dx
+	mov	rlo(0), ax	; write load address to R0
+	mov	rhi(0), dx
 
 	; initial register set up: memory size (R1)
 	mov	dx, [2]		; load first segment past program image from PSP
 	sub	dx, bx		; compute number of paragraphs available
 	xor	ax, ax		;  to the program
 	call	seglin		; and convert to a linear address
-	ldrlo	1, ax		; write memory size to R1
-	ldrhi	1, dx
+	mov	rlo(1), ax	; write memory size to R1
+	mov	rhi(1), dx
 
 	; initial register set up: stack pointer and reset vector
 	mov	ds, bx		; load DS with emulated address space
@@ -189,7 +171,7 @@ start:	mov	sp, end+stack	; beginning of stack
 
 	call	run		; emulate a Cortex M0
 
-	strlo	al, 0		; load error level from R0
+	mov	al, rlo(0)	; load error level from R0
 	mov	ah, 0x4c
 	int	0x21		; 0x4c: TERMINATE PROGRAM
 
@@ -242,9 +224,9 @@ state	resb	st_size		; BP points here
 	section	.text
 	; load one instruction into AX and advance PC past it.
 	; trashes BX, CX, and SI.
-ifetch:	strhi	cx, 15		; high part of PC for translation
+ifetch:	mov	cx, rhi(15)	; high part of PC for translation
 	call	translate	; BX: handler, CX:AX: address
-	strlo	si, 15		; CX:SI = translated address
+	mov	si, rlo(15)	; CX:SI = translated address
 	dec	si		; clear thumb bit
 	add	word rlo(15), 2	; PC += 2
 	adc	word rhi(15), 0
@@ -638,7 +620,7 @@ h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 	; 01001BBBCCCCCCCC LDR Rt, [PC, #imm8]
 .ldr:	xchg	di, si		; set up DI = &Rt, SI = #imm8
 	call	fixRd		; set flags on Rd if needed
-	strlo	ax, 15		; AX = R15(lo)
+	mov	ax, rlo(15)	; AX = R15(lo)
 	shl	si, 1		; SI = #imm8 << 2 + 2
 	inc	si
 	shl	si, 1
@@ -1100,8 +1082,8 @@ h1010:	mov	di, [bp+oprB]	; di = &Rd
 	and	al, ~3		; aligned to word boundary
 	jmp	.fi
 .sp:	call	fixRd		; fix up flags to Rd if needed
-	strlo	ax, 13		; load SP into DX:AX
-	strhi	dx, 13
+	mov	ax, rlo(13)	; load SP into DX:AX
+	mov	dx, rhi(13)
 .fi:	mov	cx, [bp+oprC]	; CX = #imm8 >> 2
 	shl	cx, 1
 	shl	cx, 1		; CX = #imm8
@@ -1968,7 +1950,7 @@ dump	db	"R0  "
 
 	; b700 terminate emulation
 	section	.text
-hB700:	strlo	al, 0		; AL = R0(lo) (error level)
+hB700:	mov	al, rlo(0)	; AL = R0(lo) (error level)
 	mov	ah, 0x4c
 	int	0x21		; 0x4c: TERMINATE PROGRAM
 
@@ -2003,7 +1985,7 @@ hB701:	call	fixflags	; set up flags
 	jmp	puts		; dump registers and return
 
 	; b702 console output
-hB702:	strlo	dl, 0		; AL = R0(lo)
+hB702:	mov	dl, rlo(0)	; AL = R0(lo)
 	mov	ah, 0x02
 	int	0x21		; 0x02: DISPLAY OUTPUT
 	ret
