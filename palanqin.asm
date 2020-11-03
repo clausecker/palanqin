@@ -1949,6 +1949,7 @@ htB7	dw	hB700		; terminate emulation
 	dw	hB702		; console output
 	dw	hB703		; console input (no echo)
 	dw	hB704		; check input status
+	dw	hB705		; perform DOS interrupt
 B7max	equ	($-htB7-2)/2	; highest escape hatch number used
 
 	; register dump template
@@ -2027,6 +2028,63 @@ hB704:	mov	ah, 0x0b
 	lea	di, rlo(0)
 	stosw			; R0 = input status (0 or -1)
 	stosw
+	ret
+
+	section	.bss
+spsav	resw	1		; stack pointer save area
+
+	; b705 perform DOS interrupt
+	section	.text
+hB705:	call	fixflags	; set up [bp+flags]
+	mov	[spsav], sp	; save stack pointer
+	xor	bx, bx
+	mov	ds, bx		; access interrupt table
+	mov	bl, rlo(9)	; interrupt number
+	shl	bx, 1		; interrupt table offset
+	shl	bx, 1
+	push	word [bp+flags]	; set up flags according to emulator state
+	popf
+	pushf			; push return address and flags
+	mov	ax, .done	; as the INT instruction does
+	push	ax
+	push	word [bx+2]	; push interrupt handler address
+	push	word [bx]
+	mov	ax, rlo(0)	; set up registers
+	mov	cx, rlo(1)
+	mov	dx, rlo(2)
+	mov	bx, rlo(3)
+	mov	si, rlo(6)
+	mov	di, rlo(7)
+	mov	es, rlo(8)
+	mov	ds, rlo(11)
+	mov	bp, rlo(5)	; must be done last (destroys state pointer)
+	cli			; simulate an INT instruction
+	retf
+.done:	sti			; enable interrupts
+				; (protects against dodgy INT handlers)
+	push	cs		; restore SS:SP
+	pop	ss
+	mov	sp, [cs:spsav]
+	push	bp		; save orig. return value of bp
+	mov	bp, state	; restore state pointer
+	mov	rlo(0), ax	; restore registers
+	mov	rlo(1), cx
+	mov	rlo(2), dx
+	mov	rlo(3), bx
+	mov	rlo(4), sp
+	pop	word rlo(5)	; the bp value we just pushed
+	mov	rlo(6), si
+	mov	rlo(7), di
+	mov	rlo(8), es
+	mov	rlo(10), ss
+	mov	rlo(11), ds
+	pushf
+	pop	ax		; the flags we received from the int handler
+	mov	rlo(12), ax	; return them in R12 and set up NZCV
+	mov	[bp+flags], ax
+	mov	ax, cs		; restore segment registers
+	mov	ds, ax
+	mov	es, ax
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
