@@ -1080,17 +1080,16 @@ h1001:	push	ax		; remember the instruction
 h1010:	mov	di, [bp+oprB]	; di = &Rd
 	xchg	cx, ax		; save instruction around fixRd
 	fixRd			; fix up flags to Rd if needed
-	test	ch, 0x08	; is this ADD Rd, SP, #imm8?
-	jnz	.sp		; if not, this is ADD Rd, PC, #imm8
-	mov	ax, 2		; DX:AX = 2
+	xor	ax, ax
+	xchg	al, ch		; AX = 1010XBBB, CX = #imm8 >> 2
+	lea	si, rlo(15)	; SI = &PC
+	and	al, 0x08	; set AX to 8 if "ADD Rd, SP, #imm8" else 0
+	sub	si, ax		; set SI = &SP if "ADD Rd, SP, #imm8"
+	mov	al, 2		; DX:AX = 2
 	cwd
-	add	ax, rlo(15)	; DX:AX = R15 + 2
-	adc	dx, rhi(15)
+	add	ax, [si]	; DX:AX = SP/PC + 2
+	adc	dx, [si+2]	; (the +2 does nothing for SP)
 	and	al, ~3		; aligned to word boundary
-	jmp	.fi
-.sp:	mov	ax, rlo(13)	; load SP into DX:AX
-	mov	dx, rhi(13)
-.fi:	xor	ch, ch		; CX = #imm8 >> 2
 	shl	cx, 1
 	shl	cx, 1		; CX = #imm8
 	add	ax, cx		; DX:AX == DX:AX + CX (= PC/SP + #imm8)
