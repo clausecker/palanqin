@@ -762,9 +762,10 @@ h00010:	cmp	cl, 16		; shift by more than 16?
 	sar	ax, cl		; AX = Rm(hi) >> imm5 - 16
 	cwd			; DX = Rm(hi) < 0 ? -1 : 0
 	stosw			; Rd = DX:AX
+	lahf			; update CF in flags
+	mov	[bp+flags], ah
 	xchg	ax, dx
 	stosw
-	mov	[bp+flags], dl	; update CF in flags
 .ret:	ret
 
 	; shift by 0 < CL <= 16
@@ -822,11 +823,10 @@ h0100000110:
 	; 0100000111BBBCCC RORS Rdn, Rm
 h0100000111:
 	mov	cl, [si]	; CL = Rm
-	test	cl, cl		; no rotate?
-	jz	.ret
+	and	cl, 31		; mask out useless extra rotates
+	jz	.ret		; no rotate?
 	mov	ax, [di]	; DX:AX = Rdn
 	mov	dx, [di+hi]
-	and	cl, 31		; mask out useless extra rotates
 	cmp	cl, 16		; rotating by 16 or more?
 	jb	.lo
 	sub	cl, 16		; if yes, reduce to rotation to 0 <= cl < 16
@@ -873,15 +873,14 @@ h0100001000:
 	; CF = Rn == 0
 h0100001001:
 	lodsw			; AX = Rm(lo)
-	xor	dx, dx
 	neg	ax		; AX = -AX
 	stosw
 	sbb	ax, ax		; AX = Rm(lo) == 0 ? -1 : 0
 	sub	ax, [si]	; AX = -Rm(hi) - carry
 	stosw			; Rd = DX:AX
 	cmc			; adjust CF to ARM conventions
-	lahf			; remember CF in flags
-	mov	[bp+flags], ah
+	pushf
+	pop	word [bp+flags]	; remember OF and CF in flags
 	ret
 
 	; 0100001010BBBCCC CMP Rn, Rm
@@ -907,8 +906,8 @@ h0100001011:
 	lodsw			; AX = Rm(lo)
 	add	ax, [di]	; set flags according to Rn(lo) + Rm(lo)
 	lahf			; and remember ZF in AH
-	lodsw			; AX = Rm(hi)
-	adc	ax, [di+hi]	; set CF, SF, and OF according to Rn - Rm
+	mov	dx, [si]	; DX = Rm(hi)
+	adc	dx, [di+hi]	; set CF, SF, and OF according to Rn - Rm
 	jmp	h0100001010.flags ; rest is the same as with CMP Rn, Rm
 
 	; 0100001100BBBCCC ORRS Rd, Rm
@@ -1598,7 +1597,7 @@ fixflags:
 	ret			; if yes, there's nothing left to do
 
 	; fixRd entry point
-.entry:	mov	bx, [bp+zsreg]
+.entry:	mov	bx, di		; we have DI == [bp+zsreg] here
 .fix:	xor	dx, dx
 	cmp	[bx], dx	; set ZF according to R(lo)
 	lahf
@@ -1613,7 +1612,7 @@ fixflags:
 				; AH to just ZF and SF
 	or	al, ah		; merge the two
 	mov	[bp+flags], al	; write them back
-	mov	[bp+zsreg], dx	; and mark the flags as being fixed
+	mov	[bp+zsreg], dx	; and mark the flags as fixed
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
