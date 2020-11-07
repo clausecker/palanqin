@@ -56,6 +56,11 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 %%nofix:
 %endmacro
 
+	; align to an even address, use 0xcc for padding
+%macro	aligncc	0
+	align	2, int3
+%endmacro
+
 	; 8086 flags (those we find useful)
 CF	equ	0x0001
 ZF	equ	0x0040
@@ -264,6 +269,7 @@ run:	push	cs		; set up es = ds = cs
 	jmp	.step		; do it again and again
 
 	; simulate one instruction.  Assumes ES=DS=CS.
+	aligncc
 step:	ifetch			; fetch instruction
 	push	ax		; push a copy of the current instruction
 	mov	bx, ax		; and keep another one in AX
@@ -312,6 +318,7 @@ dtXXXX:	dw	imm5rr		; 000XX imm5 / Rm / Rd
 	; 000XX... where XX != 11 is decoded as imm5 / reg / reg,
 	; 000110... as reg / reg / reg and
 	; 000111 as imm5 / reg / reg again
+	aligncc
 d0001:	mov	cx, ax		; make a copy of insn
 	and	ch, 0xc		; mask the two bits 00001100
 	cmp	ch, 0x08	; are these set to 10?
@@ -323,6 +330,7 @@ d0001:	mov	cx, ax		; make a copy of insn
 	; for d000, we don't treat the 00011 opcodes specially;
 	; the handler for these instructions must manually decode the
 	; register from oprA
+	align	2
 imm5rr:	mov	cx, ax		; CX = XXXX XAAA AABB BCCC
 	shl	ax, 1		; AX = XXXX AAAA ABBB CCC0
 	shl	ax, 1		; AX = XXXA AAAA BBBC CC00
@@ -343,6 +351,7 @@ imm5rr:	mov	cx, ax		; CX = XXXX XAAA AABB BCCC
 	; decode handler for reg / imm8
 	; instruction layout: XXXX XBBB CCCC CCCC
 	; TODO: oprC isn't actually needed anywere.  Can we skip setting it up?
+	aligncc
 rimm8:	xor	cx, cx
 	xchg	ah, cl		; AX=imm8, CX=reg
 	stosw			; oprC=imm8
@@ -356,6 +365,7 @@ rimm8:	xor	cx, cx
 
 	; decode handler for reg / reg / reg
 	; instruction layout: XXXXXXXAAABBBCCC
+	aligncc
 rrr:	mov	cx, ax		; CX = XXXX XXXA AABB BCCC
 	shl	ax, 1		; AX = XXXX XXAA ABBB CCC0
 	shl	ax, 1		; AX = XXXX XAAA BBBC CC00
@@ -379,6 +389,7 @@ rrr:	mov	cx, ax		; CX = XXXX XXXA AABB BCCC
 	; 010000... is decoded as imm5 / reg / reg (imm4, really)
 	; 010001... is decoded in a special manner
 	; 01001... is decoded as reg / imm8
+	aligncc
 d0100:	test	ax, 0x0800	; is this 01001...?
 	jnz	rimm8		; if yes, decode as reg / imm8
 	test	ax, 0x0400	; else, is this 010000...?
@@ -404,6 +415,7 @@ d0100:	test	ax, 0x0800	; is this 01001...?
 	; fallthrough
 
 	; decode handlers that perform no decoding
+	align	2, ret
 dnone:	ret
 
 	section	.data
@@ -514,6 +526,7 @@ htB2BA	dw	hB200		; SXTH Rd, Rm
 
 	; 000XXAAAAABBBCCC shift immediate
 	; 00011XYAAABBBCCC add/subtract register/immediate
+	aligncc
 h000:	mov	bl, ah		; BL = 000XXAAA
 	shr	bl, 1		; BL = 0000XXAA
 	and	bx, 0x0c	; BL = 0000XX00
@@ -525,18 +538,21 @@ h000:	mov	bl, ah		; BL = 000XXAAA
 	jz	.adj
 	jmp	[ht000XX+bx]	; call instruction specific handler
 
+	align	2
 .adj:	test	bl, bl		; is this LSLS?
 	jz	h0000000000
 	mov	cl, 32		; otherwise adjust CL to 32
 	jmp	[ht000XX+bx]
 
 	; 0000000000BBBCCC MOVS Rd, Rm
+	aligncc
 h0000000000:
 	movsw			; Rd = Rm
 	movsw
 	ret
 
 	; 00011XXAAABBBCCC add/sub register/immediate
+	aligncc
 h00011:	test	ax, 0x0400	; is this register or immediate?
 	jnz	h000111
 
@@ -560,6 +576,7 @@ h00011:	test	ax, 0x0400	; is this register or immediate?
 
 	; 0001110AAABBBCCC ADDS Rd, Rn, #imm3
 	; 0001111AAABBBCCC SUBS Rd, Rn, #imm3
+	aligncc
 h000111:add	ax, -0x1e00	; CF = instruction is SUBS
 	xchg	ax, cx		; AX = 000BBCCC
 	sbb	dx, dx		; DX = ADD ? 0 : -1
@@ -575,6 +592,7 @@ h000111:add	ax, -0x1e00	; CF = instruction is SUBS
 	ret
 
 	; 001XXBBBCCCCCCCC add/subtract/compare/move immediate
+	aligncc
 h001:	mov	bl, ah		; BL = 001XXAAA
 	shr	bl, 1		; BL = 0001XXAA
 	and	bx, 0xc		; BL = 0000XX00
@@ -585,11 +603,13 @@ h001:	mov	bl, ah		; BL = 001XXAAA
 	jmp	[ht001XX+bx]	; call instruction specific handler
 
 	; 00100BBBCCCCCCCC MOVS Rd, #imm8
+	aligncc
 h00100:	stosw			; Rd = #imm8
 	mov	[di], si
 	ret
 
 	; 00101BBBCCCCCCCC CMP Rn, #imm8
+	aligncc
 h00101:	mov	dx, [di+hi]
 	cmp	[di], ax	; Rd(lo) - #imm8 (for ZF and borrow)
 	lahf			; remember ZF according to Rd(lo) - #imm8 in AH
@@ -604,6 +624,7 @@ h00101:	mov	dx, [di+hi]
 	ret
 
 	; 00110BBBCCCCCCCC ADDS Rd, #imm8
+	aligncc
 h00110:	add	[di], ax	; Rd += AX
 	adc	[di+hi], si
 	pushf			; remember flags
@@ -611,6 +632,7 @@ h00110:	add	[di], ax	; Rd += AX
 	ret
 
 	; 00111BBBCCCCCCCC SUBS Rd, #imm8
+	aligncc
 h00111:	sub	[di], ax	; Rd -= AX
 	sbb	[di+hi], si
 	cmc			; adjust CF to ARM conventions
@@ -621,6 +643,7 @@ h00111:	sub	[di], ax	; Rd -= AX
 	; 010000AAAABBBCCC data-processing register
 	; 010001AACBBBBCCC special data processing
 	; 01001BBBCCCCCCCC LDR Rd, [PC, #imm8]
+	aligncc
 h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 	mov	si, [bp+oprB]	; SI = &Rm
 	test	ax, 0x0800	; is this LDR Rd, [PC, #imm8]?
@@ -631,12 +654,16 @@ h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 	mov	bx, [bp+oprA]	; BX = 0000AAAA
 	shl	bx, 1		; BX = 000AAAA0
 	jmp	[ht010000XXXX+bx]
+
+	aligncc
 .sdp:	mov	bl, ah		; BL = 010001AA
 	and	bx, 0x03	; BX = 000000AA
 	shl	bx, 1		; BX = 00000AA0
 	lea	cx, rlo(15)	; CX = &PC
 	jmp	[ht010001XX+bx]
+
 	; 01001BBBCCCCCCCC LDR Rt, [PC, #imm8]
+	aligncc
 .ldr:	xchg	di, si		; set up DI = &Rt, SI = #imm8
 	fixRd			; set flags on Rd if needed
 	mov	ax, rlo(15)	; AX = R15(lo)
@@ -650,6 +677,7 @@ h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 	jmp	ldr		; perform the actual load
 
 	; 0100000000BBBCCC ANDS Rdn, Rm
+	aligncc
 h0100000000:
 	lodsw			; AX = Rm(lo)
 	and	[di], ax	; Rdn(lo) &= Rm(lo)
@@ -658,6 +686,7 @@ h0100000000:
 	ret
 
 	; 0100000001BBBCCC EORS Rdn, Rm
+	aligncc
 h0100000001:
 	lodsw			; AX = Rm(lo)
 	xor	[di], ax	; Rdn(lo) ^= Rm(lo)
@@ -666,6 +695,7 @@ h0100000001:
 	ret
 
 	; 0100000010BBBCCC LSLS Rdn, Rm
+	aligncc
 h0100000010:
 	mov	cl, [si]	; CL = Rm
 	test	cl, cl		; no shift?
@@ -676,6 +706,7 @@ h0100000010:
 	; fallthrough
 
 	; 00000AAAAABBBCCC LSLS Rd, Rm, #imm5
+	align	2
 h00000:	cmp	cl, 16		; shift by more than 16?
 	jbe	.lo
 
@@ -690,6 +721,7 @@ h00000:	cmp	cl, 16		; shift by more than 16?
 .ret:	ret
 
 	; shift by 0 < CL <= 16
+	aligncc
 .lo:	lodsw			; AX = Rm(lo)
 	mov	bx, ax		; keep a copy
 	shl	ax, cl		; AX = Rm(lo) << #imm5
@@ -706,6 +738,7 @@ h00000:	cmp	cl, 16		; shift by more than 16?
 	ret
 
 	; shift by 32 < CL
+	aligncc
 .hi:	xor	ax, ax		; Rd = 0
 	stosw
 	stosw
@@ -713,6 +746,7 @@ h00000:	cmp	cl, 16		; shift by more than 16?
 	ret
 
 	; 0100000011BBBCCC LSRS Rdn, Rm
+	aligncc
 h0100000011:
 	mov	cl, [si]	; CL = Rm
 	test	cl, cl		; no shift?
@@ -737,6 +771,7 @@ h00001:	cmp	cl, 16		; shift by more than 16?
 .ret:	ret
 
 	; shift by 0 < CL <= 16
+	aligncc
 .lo:	lodsw			; DX = Rm(lo)
 	xchg	ax, dx
 	shr	dx, cl		; DX = Rm(lo) >> #imm5
@@ -754,6 +789,7 @@ h00001:	cmp	cl, 16		; shift by more than 16?
 	ret
 
 	; 0100000100BBBCCC ASRS Rdn, Rm
+	aligncc
 h0100000100:
 	mov	cl, [si]	; CL = Rm
 	test	cl, cl		; shift by 0?
@@ -779,6 +815,7 @@ h00010:	cmp	cl, 16		; shift by more than 16?
 .ret:	ret
 
 	; shift by 0 < CL <= 16
+	aligncc
 .lo:	lodsw			; DX = Rm(lo)
 	xchg	ax, dx
 	shr	dx, cl		; DX = Rm(lo) >> #imm5
@@ -796,6 +833,7 @@ h00010:	cmp	cl, 16		; shift by more than 16?
 	ret
 
 	; shift by 32 <= CL
+	aligncc
 .hi:	mov	ah, [si+hi+1]	; AH = Rm(hi) (high byte)
 	cwd			; DX = Rm < 0 ? -1 : 0
 	mov	[bp+flags], dl	; set CF depending on DX
@@ -805,6 +843,7 @@ h00010:	cmp	cl, 16		; shift by more than 16?
 	ret
 
 	; 0100000101BBBCCC ADCS Rdn, Rm
+	aligncc
 h0100000101:
 	mov	ah, [bp+flags]	; restore CF from flags
 	sahf
@@ -817,6 +856,7 @@ h0100000101:
 	ret
 
 	; 0100000110BBBCCC SBCS Rdn, Rm
+	aligncc
 h0100000110:
 	mov	ah, [bp+flags]	; restore CF from flags
 	sahf
@@ -831,6 +871,7 @@ h0100000110:
 	ret
 
 	; 0100000111BBBCCC RORS Rdn, Rm
+	aligncc
 h0100000111:
 	mov	cl, [si]	; CL = Rm
 	and	cl, 31		; mask out useless extra rotates
@@ -860,6 +901,7 @@ h0100000111:
 .ret:	ret
 
 	; 0100001000BBBCCC TST Rn, Rm
+	aligncc
 h0100001000:
 	lodsw			; DX:AX = Rm
 	mov	dx, [si]
@@ -881,6 +923,7 @@ h0100001000:
 
 	; 0100001001BBBCCC RSBS Rd, Rm, #0
 	; CF = Rn == 0
+	aligncc
 h0100001001:
 	lodsw			; AX = Rm(lo)
 	neg	ax		; AX = -AX
@@ -895,6 +938,7 @@ h0100001001:
 
 	; 0100001010BBBCCC CMP Rn, Rm
 	; 01000101CBBBBCCC CMP Rn, Rm
+	aligncc
 h01000101:
 h0100001010:
 	lodsw			; AX = Rm(lo)
@@ -912,6 +956,7 @@ h0100001010:
 	ret
 
 	; 0100001011BBBCCC CMN Rn, Rm
+	aligncc
 h0100001011:
 	lodsw			; AX = Rm(lo)
 	add	ax, [di]	; set flags according to Rn(lo) + Rm(lo)
@@ -921,6 +966,7 @@ h0100001011:
 	jmp	h0100001010.flags ; rest is the same as with CMP Rn, Rm
 
 	; 0100001100BBBCCC ORRS Rd, Rm
+	aligncc
 h0100001100:
 	lodsw			; AX = Rm(lo)
 	or	[di], ax	; Rdn(lo) |= Rm(lo)
@@ -929,6 +975,7 @@ h0100001100:
 	ret
 
 	; 0100001101BBBCCC MULS Rd, Rm
+	aligncc
 h0100001101:
 	lodsw			; AX = Rm(lo)
 	mov	bx, ax		; remember a copy
@@ -946,6 +993,7 @@ h0100001101:
 	ret
 
 	; 0100001110BBBCCC BICS Rd, Rm
+	aligncc
 h0100001110:
 	lodsw			; AX = Rm(lo)
 	not	ax		; AX = ~Rm(lo)
@@ -957,6 +1005,7 @@ h0100001110:
 
 
 	; 0100001111BBBCCC MVNS Rd, Rm
+	aligncc
 h0100001111:
 	lodsw			; AX = Rm(lo)
 	not	ax		; AX = ~Rm(lo)
@@ -967,6 +1016,7 @@ h0100001111:
 	ret
 
 	; ADD Rd, Rm
+	aligncc
 h01000100:
 	fixRd			; fix flags if needed
 	lodsw			; AX = Rm(lo)
@@ -979,16 +1029,19 @@ h01000100:
 	jmp	updatePC	; and fix the PC cache
 
 	; 01000110CBBBBCCC MOV Rd, Rm
+	aligncc
 h01000110:
 	fixRd			; fix flags if needed
-	cmp	di, cx		; is DI = &PC?
 	movsw			; Rd = Rm
 	movsw
+	sub	di, 4		; restore DI
+	cmp	di, cx		; is DI = &PC?
 	jz	h01000100.fix	; if yes, fix up PC cache
 .ret:	ret
 
 	; 010001110BBBBXXX BX Rm
 	; 010001111BBBBXXX BLX Rm
+	aligncc
 h01000111:
 	mov	di, cx		; DI = &PC
 	test	al, 0x80	; is this BLX?
@@ -1005,6 +1058,7 @@ h01000111:
 .arm:	jmp	undefined
 
 	; 0101XXXAAABBBCCC load/store register offset
+	aligncc
 h0101:	mov	al, ah		; AL = 0101XXXA
 	and	ax, 0x0e	; AX = 0000XXX0
 	push	ax		; remember for later
@@ -1023,6 +1077,7 @@ h0101:	mov	al, ah		; AL = 0101XXXA
 	; 01110AAAAABBBCCC STRB Rt, [Rn, #imm5]
 	; 01101AAAAABBBCCC LDR  Rt, [Rn, #imm5]
 	; 01111AAAAABBBCCC LDRB Rt, [Rn, #imm5]
+	aligncc
 h011:	mov	si, [bp+oprB]	; SI = &Rn
 	mov	di, [bp+oprC]	; DI = &Rt
 	xchg	dx, ax		; DX = instruction
@@ -1049,6 +1104,7 @@ h011:	mov	si, [bp+oprB]	; SI = &Rn
 
 	; 10000AAAAABBBCCC STRH Rt, [Rn, #imm5]
 	; 10001AAAAABBBCCC LDRH Rt, [Rn, #imm5]
+	aligncc
 h1000:	mov	si, [bp+oprB]	; SI = &Rn
 	mov	di, [bp+oprC]	; DI = &Rt
 	xchg	dx, ax		; DX = instruction
@@ -1066,6 +1122,7 @@ h1000:	mov	si, [bp+oprB]	; SI = &Rn
 
 	; 10010BBBCCCCCCCC STR Rd, [SP, #imm8]
 	; 10011BBBCCCCCCCC LDR Rd, [SP, #imm8]
+	aligncc
 h1001:	xchg	dx, ax		; DX = instruction
 	mov	di, [bp+oprB]	; DI = &Rt
 	fixRd
@@ -1083,6 +1140,7 @@ h1001:	xchg	dx, ax		; DX = instruction
 
 	; 10100BBBCCCCCCCC ADD Rd, PC, #imm8 (ADR Rd, label)
 	; 10101BBBCCCCCCCC ADD Rd, SP, #imm8
+	aligncc
 h1010:	mov	di, [bp+oprB]	; di = &Rd
 	xchg	cx, ax		; save instruction around fixRd
 	fixRd			; fix up flags to Rd if needed
@@ -1105,6 +1163,7 @@ h1010:	mov	di, [bp+oprB]	; di = &Rd
 
 	; miscellaneous instructions
 	; 4 more instruction bits decode the subinstruction
+	aligncc
 h1011:	mov	bl, ah		; BL = 1011XXXX
 	shl	bl, 1		; BL = 011XXXX0
 	and	bx, 0x1e	; BX = 000XXXX0
@@ -1112,6 +1171,7 @@ h1011:	mov	bl, ah		; BL = 1011XXXX
 
 	; 101100000AAAAAAA ADD SP, SP, #imm7
 	; 101100001AAAAAAA SUB SP, SP, #imm7
+	aligncc
 h10110000:
 	xor	ah, ah		; AX = 00000000XAAAAAAA
 	shl	al, 1		; AX = #imm7 >> 1, CF = ADD/SUB
@@ -1126,6 +1186,7 @@ h10110000:
 h10110001 equ	undefined
 
 	; 10111010XXBBBCCC reverse bytes
+	aligncc
 h10111010:
 	inc	ah		; AX = 10111011XXBBBCCC
 				; to select the second set of jumps in htB2BA
@@ -1133,6 +1194,7 @@ h10111010:
 
 	; 10110010XXBBBCCC (un)signed extend byte/word
 	; 10111011XXBBBCCC reverse bytes (adjusted opcode)
+	align	2
 h10110010:
 	mov	dx, 0x1c	; mask for extracting the instruction fields
 	lea	si, [bp+regs]
@@ -1157,25 +1219,29 @@ h10110010:
 	jmp	[htB2BA+bx]	; perform instruction handler
 
 	; 1011001000AAABBB SXTH Rd, Rm
+	aligncc
 hB200:	cwd			; DX:AX = SXTH(Rm(lo))
 	stosw			; Rd = DX:AX
 	mov	[di], dx
 	ret
 
 	; 1011001001AAABBB SXTB Rd, Rm
+	aligncc
 hB201:	cbw			; DX:AX = SXTB(Rm(lo))
 	cwd
 	stosw			; Rd = DX:AX
 	mov	[di], dx
 	ret
 
-hB210:	; 1011001010AAABBB UXTH Rd, Rm
-	stosw			; Rd = UXTH(Rm(lo))
+	; 1011001010AAABBB UXTH Rd, Rm
+	aligncc
+hB210:	stosw			; Rd = UXTH(Rm(lo))
 	xor	ax, ax
 	stosw
 	ret
 
 	; 1011001011AAABBB UXTB Rd, Rm
+	aligncc
 hB211:	stosb			; Rd = UXTB(Rm(lo))
 	xor	ax, ax
 	stosb
@@ -1187,6 +1253,7 @@ h10110011 equ	undefined
 
 	; 10110100BBBBBBBB PUSH {...}
 	; 10110101BBBBBBBB PUSH {..., LR}
+	aligncc
 h1011010:
 	mov	[bp+oprC], al	; remember register set
 	test	ax, 0x0100	; want to push LR?
@@ -1202,6 +1269,7 @@ h1011010:
 	pop	cx
 	pop	ax
 .nolr:	lea	di, rlo(7)	; DI = &R7
+	align	2
 .loop:	shl	byte [bp+oprC], 1 ; advance bit-mask to next register
 	jnc	.nostr		; store current register?
 	sub	ax, 4		; CX:AX -= 4
@@ -1213,17 +1281,20 @@ h1011010:
 	pop	ax
 .iter:	sub	di, 4		; advance to next register
 	jmp	.loop		; and try again if any registers are left
+	aligncc
 .nostr:	jnz	.iter		; any registers left to push?
 	mov	rlo(13), ax	; write back SP
 	mov	rhi(13), cx
 	ret
 
 	; 10110110011ABBBB CPS
+	aligncc
 h10110110:
 	todo
 
 	; 10110111 escape hatch
 	; this instruction allows the program to interact with the host
+	aligncc
 h10110111:
 	cmp	al, B7max	; is this a valid escape hatch opcode?
 	ja	.ud		; if not, treat as undefined instruction
@@ -1242,6 +1313,7 @@ h10111001 equ	undefined
 	; 10111010XXAAABBB reverse bytes (see h10110010)
 
 	; 1011101000AAABBB REV Rd, Rm
+	aligncc
 hBA00:	xchg	ax, dx
 	lodsw			; AX = Rm(hi)
 	xchg	ah, al		; reverse Rm(hi)
@@ -1251,6 +1323,7 @@ hBA00:	xchg	ax, dx
 	ret
 
 	; 1011101001AAABBB REV16 Rd, Rm
+	aligncc
 hBA01:	xchg	ah, al		; reverse Rm(lo)
 	stosw			; Rd(lo) = REV(Rm(lo))
 	lodsw			; AX = Rm(hi)
@@ -1262,6 +1335,7 @@ hBA01:	xchg	ah, al		; reverse Rm(lo)
 hBA10	equ	undefined
 
 	; 1011101011AAABBB REVSH Rd, Rm
+	aligncc
 hBA11:	xchg	ah, al		; reverse Rm(lo)
 	cwd			; sign extend into DX:AX
 	stosw			; Rd = DX:AX
@@ -1273,12 +1347,14 @@ h10111011 equ	undefined
 
 	; 10111100AAAAAAAA POP {...}
 	; 10111101AAAAAAAA POP {..., PC}
+	aligncc
 h1011110:
 	mov	[bp+oprC], ax	; remember the instruction
 	call	fixflags	; fix flags (easier than checking for each reg)
 	mov	ax, rlo(13)	; CX:AX = SP
 	mov	cx, rhi(13)
 	lea	di, rlo(0)	; DI = &R0
+	align	2
 .loop:	shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	jnc	.noldr		; store current register?
 	push	ax		; preserve CX:AX around ldr call
@@ -1290,6 +1366,7 @@ h1011110:
 	adc	cx, 0
 .iter:	add	di, 4		; advance to next register
 	jmp	.loop		; and try again if any registers are left
+	aligncc
 .noldr:	jnz	.iter		; any registers left to pop?
 	test	byte [bp+oprC+1], 0x01 ; load PC?
 	jz	.nopc
@@ -1323,12 +1400,14 @@ h10111110:
 	; 1011111100100000 WFE
 	; 1011111100110000 WFI
 	; 1011111101000000 SEV
+	aligncc
 h10111111:
 	test	al, 0x0f	; is this IT?
 	je	.it		; if yes, generate UNDEFINED
 	ret			; else, treat as NOP
 .it:	jmp	undefined	; generate an undefined instruction exception
 
+	aligncc
 h1100:	push	ax		; remember the instruction on the stack
 	xchg	ax, di		; and in DI
 	call	fixflags	; fix flags unconditionally as it is too
@@ -1343,6 +1422,7 @@ h1100:	push	ax		; remember the instruction on the stack
 	; fall through to h11000
 
 	; 11000AAABBBBBBBB STMIA Rn!, {...}
+	aligncc
 h11000:	shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	jnc	.nostr		; store the current register?
 	push	ax		; remember the current address
@@ -1354,6 +1434,7 @@ h11000:	shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	adc	cx, 0
 .iter:	add	di, 4		; advance to next register
 	jmp	h11000
+	aligncc
 .nostr:	jnz	.iter		; want to store further registers?
 	pop	di		; DI = &Rn
 	stosw			; Rn = CX:AX
@@ -1363,6 +1444,7 @@ h11000:	shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	ret
 
 	; 11001AAABBBBBBBB LDMIA Rn!, {...}
+	aligncc
 h11001: shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	jnc	.noldr		; store the current register?
 	push	ax		; remember the current address
@@ -1374,6 +1456,7 @@ h11001: shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	adc	cx, 0
 .iter:	add	di, 4		; advance to next register
 	jmp	h11001
+	aligncc
 .noldr:	jnz	.iter		; want to load further registers?
 	pop	di		; DI = &Rn
 	mov	dx, cx		; DX:AX = final address
@@ -1391,6 +1474,7 @@ h11001: shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	; 1101BBBBCCCCCCCC B<c> <label>
 	; 11011110CCCCCCCC UDF #imm8
 	; 11011111CCCCCCCC SVC #imm8
+	aligncc
 h1101:	mov	cl, ah		; CL = 1101AAAA
 	xchg	cx, ax		; CX = insn, AL = 1101AAAA
 	shl	al, 1		; AL = 101AAAA0
@@ -1486,6 +1570,7 @@ h1101xxxx:
 	align	4, int3
 	jmp	.svc
 
+	aligncc
 .taken:	xchg	ax, cx		; AL = #imm8
 	cbw			; AX = #imm8
 	inc	ax		; AX = #imm8 + 1
@@ -1501,6 +1586,7 @@ h1101xxxx:
 
 	; 11100CCCCCCCCCCC B #imm11
 	; 11101XXXXXXXXXXX 32-bit instructions
+	aligncc
 h1110:	test	ax, 0x0800	; is this B #imm11?
 	jnz	.udf		; or is it a 32 bit instruction?
 	add	ax, 0x1c00	; AX = ccccccCCCCCCCCCC (c = complemented sign)
@@ -1514,6 +1600,7 @@ h1110:	test	ax, 0x0800	; is this B #imm11?
 .udf:	jmp	undefined	; 11101XXXXXXXXXXX is undefined
 
 	; 32 bit instructions
+	aligncc
 h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 	jnz	h1110.udf	; if yes, execute as undefined.
 	push	ax		; remember low instruction word
@@ -1558,6 +1645,7 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 
 	; if we get here, it is known that the instruction has the form
 	; 11110XXXXXXXXXXX 10Y0YYYYYYYYYYYY
+	aligncc
 .notbl:	cmp	dh, 0xf3	; is it 11110011?
 	jne	.udf
 	cmp	dl, 0xef	; is it 1111001111101111 (MRS)?
@@ -1580,9 +1668,11 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 	ret
 
 	; 11110011111XXXXX 10X0AAAABBBBBBBB MRS Rn, spec_reg
+	aligncc
 .mrs:	todo
 
 	; 11110011100XAAAA 10X0XXXXBBBBBBBB MSR spec_reg, Rn
+	aligncc
 .msr:	sub	dx, cx		; DX = 000000000000AAAA
 	todo
 
@@ -1592,6 +1682,7 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 
 	; set ZF and SF in flags according to zsreg
 	; trashes AX and BX
+	aligncc
 fixflags:
 	mov	bx, [bp+zsreg]
 	test	bx, bx		; flags already fixed?
@@ -1599,6 +1690,7 @@ fixflags:
 	ret			; if yes, there's nothing left to do
 
 	; fixRd entry point
+	aligncc
 .entry:	mov	bx, di		; we have DI == [bp+zsreg] here
 .fix:	mov	ax, [bx]	; ax = zsreg(lo)
 	or	al, ah		; make sure LSB of AH is accounted for
@@ -1627,6 +1719,7 @@ fixflags:
 	; in CX and a pointer to a structure of accessor functions in BX.
 	; Preserves all other registers.
 	section	.text
+	aligncc
 translate:
 	mov	bl, ch		; load address space nibble
 	and	bx, 0xf0	; isolate address space nibble
@@ -1657,6 +1750,7 @@ xlttab:	dw	xltadj		; 00000000--000fffff adjusted memory
 
 	; translator for imgbase adjusted memory
 	section	.text
+	aligncc
 xltadj:	xchg	si, cx		; preserve old SI
 	shl	si, 1		; form a table index
 	and	si, 0x001e	; mask out relevant nibble
@@ -1666,6 +1760,7 @@ xltadj:	xchg	si, cx		; preserve old SI
 	ret
 
 	; translator for unadjusted memory
+	aligncc
 xltraw:	xchg	si, cx		; preserve old SI
 	shl	si, 1		; form a table index
 	and	si, 0x001e	; mask out relevant nibble
@@ -1675,17 +1770,21 @@ xltraw:	xchg	si, cx		; preserve old SI
 	ret
 
 	; translator for I/O ports
+	aligncc
 xltio:	mov	bx, memio	; I/O memory access
 	ret
 
 	; translator for open bus
+	aligncc
 xltnone:mov	bx, memnone	; no memory access
 	ret
 
 	; translator for the private peripheral bus (PPB)
+	aligncc
 xltppb:	todo
 
 	; translator for the vendor-use area
+	aligncc
 xltvendor:
 	todo
 
@@ -1727,6 +1826,7 @@ memnone	times	6 dw ldstnone
 
 	; load word from memory
 	section	.text
+	aligncc
 ldrmem:	push	ds		; remember old DS
 	mov	ds, cx		; set up DS for DS:SI memory load
 	mov	ax, [si]	; DX:AX = [CX:SI]
@@ -1735,6 +1835,7 @@ ldrmem:	push	ds		; remember old DS
 	ret
 
 	; load half word from memory
+	aligncc
 ldrhmem:mov	dx, ds		; remember old DS
 	mov	ds, cx		; set up DS for DS:SI memory load
 	mov	ax, [si]	; AX = [CX:SI]
@@ -1742,6 +1843,7 @@ ldrhmem:mov	dx, ds		; remember old DS
 	ret
 
 	; load byte from memory
+	aligncc
 ldrbmem:mov	dx, ds		; remember old DS
 	mov	ds, cx		; set up DS for DS:SI memory load
 	mov	al, [si]	; AL = [CX:SI]
@@ -1749,6 +1851,7 @@ ldrbmem:mov	dx, ds		; remember old DS
 	ret
 
 	; store word to memory
+	aligncc
 strmem:	push	ds		; remember old DS
 	mov	ds, cx		; set up DS for DS:SI store
 	mov	[si], ax	; [CX:SI] = AX:DX
@@ -1757,6 +1860,7 @@ strmem:	push	ds		; remember old DS
 	ret
 
 	; store half word to memory
+	aligncc
 strhmem:mov	dx, ds		; remember old DS
 	mov	ds, cx		; set up DS for DS:SI store
 	mov	[si], ax	; [CX:SI] = AX
@@ -1764,6 +1868,7 @@ strhmem:mov	dx, ds		; remember old DS
 	ret
 
 	; store byte to memory
+	aligncc
 strbmem:mov	dx, ds		; remember old DS
 	mov	ds, cx		; set up DS for DS:SI store
 	mov	[si], al	; [CX:SI] = AL
@@ -1771,6 +1876,7 @@ strbmem:mov	dx, ds		; remember old DS
 	ret
 
 	; load word from I/O port
+	aligncc
 ldrio:	mov	dx, si		; set up DX for IN instruction
 	in	ax, dx		; load low word
 	inc	dx
@@ -1782,16 +1888,19 @@ ldrio:	mov	dx, si		; set up DX for IN instruction
 	ret
 
 	; load half word from I/O port
+	aligncc
 ldrhio:	mov	dx, si		; set up DX for IN instruction
 	in	ax, dx		; load word
 	ret
 
 	; load byte from I/O port
+	aligncc
 ldrbio:	mov	dx, si		; set up DX for IN instruction
 	in	al, dx		; load byte
 	ret
 
 	; store word to I/O port
+	aligncc
 strio:	push	dx		; temporarily remember high word
 	mov	dx, si		; set up DX for OUT instruction
 	out	dx, ax		; store low word
@@ -1802,16 +1911,19 @@ strio:	push	dx		; temporarily remember high word
 	ret
 
 	; store half word to I/O port
+	aligncc
 strhio:	mov	dx, si		; set up DX for OUT instruction
 	out	dx, ax		; store word
 	ret
 
 	; store byte to I/O port
+	aligncc
 strbio:	mov	dx, si		; set up DX for OUT instruction
 	out	dx, al		; store byte
 	ret
 
 	; store nothing/load 0xffffffff
+	aligncc
 ldstnone:
 	mov	ax, 0xffff	; DX:AX = -1
 	mov	dx, ax
@@ -1819,6 +1931,7 @@ ldstnone:
 
 	; load word from ARM address CX:AX and deposit into the register
 	; pointed to by DI.  Preserve DI.
+	aligncc
 ldr:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldr]	; DX:AX = mem[CX:SI]
@@ -1828,6 +1941,7 @@ ldr:	call	translate	; CX:AX: translated address, BX: handler
 
 	; load halfword from ARM address CX:AX and deposit into the register
 	; pointed to by DI.
+	aligncc
 ldrh:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldrh]	; AX = mem[CX:SI]
@@ -1838,6 +1952,7 @@ ldrh:	call	translate	; CX:AX: translated address, BX: handler
 
 	; load signed halfword from ARM address CX:AX and deposit into the
 	; the register pointed to by DI.
+	aligncc
 ldrsh:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldrh]	; AX = mem[CX:SI]
@@ -1848,6 +1963,7 @@ ldrsh:	call	translate	; CX:AX: translated address, BX: handler
 
 	; load byte from ARM address CX:AX, zero-extend and deposit into the
 	; register pointed to by DI.
+	aligncc
 ldrb:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldrb]	; AL = mem[CX:SI]
@@ -1859,6 +1975,7 @@ ldrb:	call	translate	; CX:AX: translated address, BX: handler
 
 	; load signed byte from ARM address CX:AX and deposit into the
 	; the register pointed to by DI.
+	aligncc
 ldrsb:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldrb]	; AL = mem[CX:SI]
@@ -1870,6 +1987,7 @@ ldrsb:	call	translate	; CX:AX: translated address, BX: handler
 
 	; store word from register pointed to by DI to ARM address CX:AX.
 	; Preserve DI.
+	aligncc
 str:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	mov	ax, [di]	; DX:AX = Rt
@@ -1877,12 +1995,14 @@ str:	call	translate	; CX:AX: translated address, BX: handler
 	jmp	[bx+mem.str]
 
 	; store halfword from register pointed to by DI to ARM address CX:AX.
+	aligncc
 strh:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	mov	ax, [di]	; AX = Rt
 	jmp	[bx+mem.strh]
 
 	; store byte from register pointed to by DI to ARM address CX:AX.
+	aligncc
 strb:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	mov	al, [di]	; AL = Rt
@@ -1914,6 +2034,7 @@ seglin:	mov	cl, 4
 	; Translate the address in rhi(15) and fill in pchi, pcseg, and
 	; pcldrh.  Returns pcldrh in BX, pcseg in CX.  Preserves all other
 	; registers.
+	aligncc
 ifetchtail:			; entry point when coming from ifetch
 	inc	word rhi(15)	; apply carry from rlo(15)
 fixPC:	mov	cx, rhi(15)	; high part of PC for translation
@@ -1926,6 +2047,7 @@ fixPC:	mov	cx, rhi(15)	; high part of PC for translation
 
 	; Same as fixPC, but first check if the cache is up to do
 	; no guarantees about the return value are given.
+	aligncc
 updatePC:
 	mov	cx, rhi(15)	; high part of PC
 	cmp	cx, [bp+pchi]	; is the cache up to date?
