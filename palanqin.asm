@@ -549,13 +549,12 @@ h00011:	test	ax, 0x0400	; is this register or immediate?
 
 	; 0001110AAABBBCCC ADDS Rd, Rn, #imm3
 	; 0001111AAABBBCCC SUBS Rd, Rn, #imm3
-h000111:cmp	ax, 0x1e00	; CF = instruction is ADDS
+h000111:add	ax, -0x1e00	; CF = instruction is SUBS
 	xchg	ax, cx		; AX = 000BBCCC
-	cmc			; CF = instruction is SUBS
 	sbb	dx, dx		; DX = ADD ? 0 : -1
 	and	al, 0x07	; AX = #imm3
 	xor	ax, dx		; AX = ADD ? #imm3 : ~#imm3
-	rol	dx, 1		; CF = instruction is SUBS
+	sahf			; CF = instruction is SUBS
 	adc	ax, [si]	; DX:AX = ADDS ? Rn + #imm3 : Rn - #imm3
 	adc	dx, [si+hi]
 	stosw			; Rd = DX:AX
