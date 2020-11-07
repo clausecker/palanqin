@@ -33,7 +33,7 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 %endmacro
 
 	; compare DI with [bp+zsreg].  If both are equal, fix the flags.
-	; trashes AX, BX, and DX.  Preserves DI which may not be zero.
+	; trashes AX and BX.  Preserves DI which may not be zero.
 	; the intent is to save the flags if Rd == [bp+zsreg] and flag
 	; recovery would otherwise be impossible.
 %macro	fixRd	0
@@ -1027,9 +1027,8 @@ h0101:	mov	al, ah		; AL = 0101XXXA
 	; 01111AAAAABBBCCC LDRB Rt, [Rn, #imm5]
 h011:	mov	si, [bp+oprB]	; SI = &Rn
 	mov	di, [bp+oprC]	; DI = &Rt
-	push	ax		; remember the instruction
+	xchg	dx, ax		; DX = instruction
 	fixRd			; fix flags on Rt
-	pop	dx		; DX = instruction
 	mov	bx, [bp+oprA]	; BX = #imm5
 	lodsw			; CX:AX = Rn
 	mov	cx, [si]
@@ -1054,9 +1053,8 @@ h011:	mov	si, [bp+oprB]	; SI = &Rn
 	; 10001AAAAABBBCCC LDRH Rt, [Rn, #imm5]
 h1000:	mov	si, [bp+oprB]	; SI = &Rn
 	mov	di, [bp+oprC]	; DI = &Rt
-	push	ax		; remember the instruction
+	xchg	dx, ax		; DX = instruction
 	fixRd			; fix flags on Rt
-	pop	dx		; and restore it to DX
 	mov	bx, [bp+oprA]	; BX = #imm5
 	shl	bx, 1		; BX = #imm5 << 1
 	lodsw			; CX:AX = Rn
@@ -1070,10 +1068,9 @@ h1000:	mov	si, [bp+oprB]	; SI = &Rn
 
 	; 10010BBBCCCCCCCC STR Rd, [SP, #imm8]
 	; 10011BBBCCCCCCCC LDR Rd, [SP, #imm8]
-h1001:	push	ax		; remember the instruction
+h1001:	xchg	dx, ax		; DX = instruction
 	mov	di, [bp+oprB]	; DI = &Rt
 	fixRd
-	pop	dx		; DX = instruction
 	xor	ax, ax
 	mov	al, [bp+oprC]	; AX = #imm8
 	shl	ax, 1		; AX = #imm8 << 2
@@ -1596,7 +1593,7 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	; set ZF and SF in flags according to zsreg
-	; trashes AX, BX, and DX.
+	; trashes AX and BX
 fixflags:
 	mov	bx, [bp+zsreg]
 	test	bx, bx		; flags already fixed?
@@ -1605,21 +1602,18 @@ fixflags:
 
 	; fixRd entry point
 .entry:	mov	bx, di		; we have DI == [bp+zsreg] here
-.fix:	xor	dx, dx
-	cmp	[bx], dx	; set ZF according to R(lo)
-	lahf
-	mov	al, ah		; AL = R(lo) flags
-	cmp	[bx+hi], dx	; set ZF according to R(hi)
-	lahf
-	or	al, ~ZF		; isolate ZF in AL
-	and	ah, al		; AH = SF, ZF according to R
+.fix:	mov	ax, [bx]	; ax = zsreg(lo)
+	or	al, ah		; make sure LSB of AH is accounted for
+	shr	ah, 1		; clear MSB of AX, destroy LSB of AH
+	or	ax, [bx+hi]	; set SF and ZF on zsreg
+	lahf			; AH = SF, ZF according to zsreg
 	mov	al, [bp+flags]
 	and	ax, (ZF|SF)<<8|~(ZF|SF)&0xff
 				; mask AL to all but ZF and SF,
 				; AH to just ZF and SF
 	or	al, ah		; merge the two
 	mov	[bp+flags], al	; write them back
-	mov	[bp+zsreg], dx	; and mark the flags as fixed
+	mov	word [bp+zsreg], 0 ; and mark the flags as fixed
 	ret
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
