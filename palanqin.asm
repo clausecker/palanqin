@@ -265,7 +265,6 @@ run:	push	cs		; set up es = ds = cs
 
 	; simulate one instruction.  Assumes ES=DS=CS.
 step:	ifetch			; fetch instruction
-	int3
 	push	ax		; push a copy of the current instruction
 	mov	bx, ax		; and keep another one in AX
 	mov	cl, 5		; mask out the instruction's top 4 bits
@@ -982,11 +981,10 @@ h01000100:
 	; 01000110CBBBBCCC MOV Rd, Rm
 h01000110:
 	fixRd			; fix flags if needed
+	cmp	di, cx		; is DI = &PC?
 	movsw			; Rd = Rm
 	movsw
-	sub	di, 4		; restore old DI
-	cmp	di, cx		; is DI = &PC?
-	jz	h01000100.fix
+	jz	h01000100.fix	; if yes, fix up PC cache
 .ret:	ret
 
 	; 010001110BBBBXXX BX Rm
