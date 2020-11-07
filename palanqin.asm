@@ -1082,18 +1082,17 @@ h1010:	mov	di, [bp+oprB]	; di = &Rd
 	fixRd			; fix up flags to Rd if needed
 	xor	ax, ax
 	xchg	al, ch		; AX = 1010XBBB, CX = #imm8 >> 2
+	cwd			; DX = 0
 	lea	si, rlo(15)	; SI = &PC
 	and	al, 0x08	; set AX to 8 if "ADD Rd, SP, #imm8" else 0
 	sub	si, ax		; set SI = &SP if "ADD Rd, SP, #imm8"
-	mov	al, 2		; DX:AX = 2
-	cwd
-	add	ax, [si]	; DX:AX = SP/PC + 2
-	adc	dx, [si+2]	; (the +2 does nothing for SP)
-	and	al, ~3		; aligned to word boundary
 	shl	cx, 1
-	shl	cx, 1		; CX = #imm8
-	add	ax, cx		; DX:AX == DX:AX + CX (= PC/SP + #imm8)
-	adc	dx, 0
+	inc	cx
+	shl	cx, 1		; CX = #imm8 + 2
+	lodsw
+	add	ax, cx		; DX:AX = SP/PC + #imm8 + 2
+	adc	dx, [si]
+	and	al, ~3		; align to word boundary
 	stosw			; Rd = DX:AX
 	mov	[di], dx
 	ret
