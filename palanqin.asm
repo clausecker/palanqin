@@ -511,7 +511,6 @@ h000:	mov	bl, ah		; BL = 000XXAAA
 	mov	[bp+zsreg], di	; set SF and ZF according to Rd
 	mov	cx, [bp+oprA]	; CL = imm5 (or Rm for 000110...)
 	test	cx, cx		; if CL == 0 and it's not LSLS, adjust to 32
-				; for ADDS/SUBS, CX is a reg and is never 0.
 	jz	.adj
 	jmp	[ht000XX+bx]	; call instruction specific handler
 
@@ -550,18 +549,18 @@ h00011:	test	ax, 0x0400	; is this register or immediate?
 
 	; 0001110AAABBBCCC ADDS Rd, Rn, #imm3
 	; 0001111AAABBBCCC SUBS Rd, Rn, #imm3
-h000111:and	cx, 0x07	; CX = #imm3
-	test	ax, 0x0200	; is this ADDS or SUBS?
-	xchg	ax, cx		; AX = #imm3
-	jz	.adds
-	not	ax		; complement DX:AX and set CF
-	stc
-.adds:	cwd			; sign extend AX into DX:AX
+h000111:cmp	ax, 0x1e00	; CF = instruction is ADDS
+	xchg	ax, cx		; AX = 000BBCCC
+	cmc			; CF = instruction is SUBS
+	sbb	dx, dx		; DX = ADD ? 0 : -1
+	and	al, 0x07	; AX = #imm3
+	xor	ax, dx		; AX = ADD ? #imm3 : ~#imm3
+	rol	dx, 1		; CF = instruction is SUBS
 	adc	ax, [si]	; DX:AX = ADDS ? Rn + #imm3 : Rn - #imm3
 	adc	dx, [si+hi]
 	stosw			; Rd = DX:AX
 	mov	[di], dx
-	pushf			; remember all flags
+	pushf			; remember CF and OF in flags
 	pop	word [bp+flags]
 	ret
 
@@ -1108,15 +1107,12 @@ h1011:	mov	bl, ah		; BL = 1011XXXX
 	; 101100001AAAAAAA SUB SP, SP, #imm7
 h10110000:
 	xor	ah, ah		; AX = 00000000XAAAAAAA
-	shl	al, 1		; AX = 00000000AAAAAAA0, CF = ADD/SUB
-	jc	.sub
-	shl	ax, 1		; AX = #imm7 (in words)
-	add	rlo(13), ax	; R13 += #imm7
-	adc	word rhi(13), 0
-	ret
-.sub:	shl	ax, 1		; AX = #imm7 (in words)
-	sub	rlo(13), ax	; R13 += #imm7
-	sbb	word rhi(13), 0
+	shl	al, 1		; AX = #imm7 >> 1, CF = ADD/SUB
+	sbb	dx, dx		; DX = ADD ? 0 : -1
+	xor	ax, dx		; AX = ADD ? AX : ~AX
+	rol	ax, 1		; AX = ADD ? #imm7 : ~#imm7 - 1, CF = ADD/SUB
+	adc	rlo(13), ax	; R13 = ADD ? R13 + #imm7 : R13 - #imm7
+	adc	rhi(13), dx
 	ret
 
 	; 101100B1BBBBBCCC (CBZ Rd, #imm5)
