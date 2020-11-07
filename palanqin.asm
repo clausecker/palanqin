@@ -43,6 +43,19 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 %%nofix:
 %endmacro
 
+	; load one instruction into AX and advance PC past it.
+	; trashes BX, CX, and SI.  Assumes the PC cache is set up correctly.
+%macro	ifetch	0
+	mov	cx, [bp+pcseg]	; load translated PC segment
+	mov	si, rlo(15)	; load offset
+	dec	si		; clear thumb bit
+	call	[bp+pcldrh]	; load instruction from memory
+	add	word rlo(15), 2	; PC += 2
+	jnc	%%nofix		; fix PC cache if rhi(15) changes
+	call	ifetchtail
+%%nofix:
+%endmacro
+
 	; 8086 flags (those we find useful)
 CF	equ	0x0001
 ZF	equ	0x0040
@@ -215,6 +228,13 @@ oprC	resw	1		; third operand (towards least significant bit)
 oprB	resw	1		; second operand (middle of the instruction)
 oprA	resw	1		; first operand (towards most significant bit)
 
+	; PC decoding cache
+	; this cache is used by ifetch to fetch code, avoiding the need to
+	; translate PC unless the high word changes
+pchi	resw	1		; high PC word currently translated
+pcseg	resw	1		; translated segment corresponding to pchi
+pcldrh	resw	1		; ldrh accessor function for pchi
+
 	; Memory maps.  The high word of an ARM address sans the address space
 	; nibble is looked up in this table to form a segment.  The low word
 	; stays the same, forming an offset.
@@ -233,26 +253,18 @@ state	resb	st_size		; BP points here
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	section	.text
-	; load one instruction into AX and advance PC past it.
-	; trashes BX, CX, and SI.
-ifetch:	mov	cx, rhi(15)	; high part of PC for translation
-	call	translate	; BX: handler, CX:AX: address
-	mov	si, rlo(15)	; CX:SI = translated address
-	dec	si		; clear thumb bit
-	add	word rlo(15), 2	; PC += 2
-	adc	word rhi(15), 0
-	jmp	[bx+mem.ldrh]	; AX = instruction, tail call
 
 	; run the emulation until we need to stop for some reason
 run:	push	cs		; set up es = ds = cs
 	push	cs
 	pop	ds
 	pop	es
+	call	fixPC		; set up PC cache
 .step:	call	step		; simulate one instruction
 	jmp	.step		; do it again and again
 
 	; simulate one instruction.  Assumes ES=DS=CS.
-step:	call	ifetch		; fetch instruction
+step:	ifetch			; fetch instruction
 	int3
 	push	ax		; push a copy of the current instruction
 	mov	bx, ax		; and keep another one in AX
@@ -623,6 +635,7 @@ h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 .sdp:	mov	bl, ah		; BL = 010001AA
 	and	bx, 0x03	; BX = 000000AA
 	shl	bx, 1		; BX = 00000AA0
+	lea	cx, rlo(15)	; CX = &PC
 	jmp	[ht010001XX+bx]
 	; 01001BBBCCCCCCCC LDR Rt, [PC, #imm8]
 .ldr:	xchg	di, si		; set up DI = &Rt, SI = #imm8
@@ -961,36 +974,36 @@ h01000100:
 	add	[di], ax	; Rd(lo) += Rm(lo)
 	lodsw			; AX = Rm(hi)
 	adc	[di+hi], ax	; Rd(hi) += Rm(hi) + C
-	or	byte rlo(15), 1	; make sure thumb bit is not cleared
-	ret
+	cmp	di, cx		; is DI = &PC?
+	jnz	h01000110.ret
+.fix:	or	byte [di], 1	; make sure the thumb bit is not cleared
+	jmp	updatePC	; and fix the PC cache
 
 	; 01000110CBBBBCCC MOV Rd, Rm
 h01000110:
 	fixRd			; fix flags if needed
 	movsw			; Rd = Rm
 	movsw
-	or	byte rlo(15), 1	; make sure thumb bit is not cleared
-	ret
+	sub	di, 4		; restore old DI
+	cmp	di, cx		; is DI = &PC?
+	jz	h01000100.fix
+.ret:	ret
 
 	; 010001110BBBBXXX BX Rm
 	; 010001111BBBBXXX BLX Rm
 h01000111:
-	lea	di, rlo(15)	; DI = &PC
+	mov	di, cx		; DI = &PC
 	test	al, 0x80	; is this BLX?
-	jnz	.blx
-	movsw			; PC = Rm
-	movsw
-	test	byte rlo(15), 1	; is the thumb bit set?
-	jz	.arm
-.ret:	ret
-.blx:	mov	ax, [di]	; DX:AX = PC
+	mov	ax, [di]	; DX:AX = PC
 	mov	dx, [di+2]	;
 	movsw			; PC = Rm
 	movsw
+	jz	.bx
 	mov	rlo(14), ax	; LR = DX:AX
 	mov	rhi(14), dx
-	test	byte rlo(15), 1	; is the thumb bit set?
-	jnz	.ret
+.bx:	test	byte rlo(15), 1	; is the thumb bit set?
+	jz	.arm
+	jmp	updatePC	; update PC if required
 .arm:	jmp	undefined
 
 	; 0101XXXAAABBBCCC load/store register offset
@@ -1293,10 +1306,13 @@ h1011110:
 	pop	ax
 	add	ax, 4		; CX:AX += 4
 	adc	cx, 0
-.nopc:	mov	rlo(13), ax	; write back SP
-	mov	rhi(13), cx
 	test	byte rlo(15), 1	; is the thumb bit set?
 	jz	.arm
+	push	cx		; preserve CX around updatePC call
+	call	updatePC
+	pop	cx
+.nopc:	mov	rlo(13), ax	; write back SP
+	mov	rhi(13), cx
 	ret
 .arm:	jmp	undefined
 
@@ -1483,7 +1499,7 @@ h1101xxxx:
 	add	rlo(15), ax	; R15 += #imm8 + 2 + 2
 	adc	rhi(15), dx	; note that R15 had already been advanced by two
 				; in the initial ifetch call.
-	ret
+	jmp	updatePC	; update PC cache if needed
 
 	; 11011111XXXXXXXX SVC #imm8
 .svc:	todo			; todo
@@ -1501,14 +1517,14 @@ h1110:	test	ax, 0x0800	; is this B #imm11?
 	cwd			; DX:AX = #imm11 + 2
 	add	rlo(15), ax	; R15 += #imm11 + 2
 	adc	rhi(15), dx
-	ret
+	jmp	updatePC	; update PC cache if needed
 .udf:	jmp	undefined	; 11101XXXXXXXXXXX is undefined
 
 	; 32 bit instructions
 h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 	jnz	h1110.udf	; if yes, execute as undefined.
 	push	ax		; remember low instruction word
-	call	ifetch		; fetch high instruction word into AX
+	ifetch			; fetch high instruction word into AX
 	pop	dx		; AX:DX holds the instruction
 	test	ax, ax		; is AX 0XXXXXXXXXXXXXXX?
 	jns	.udf		; if yes, execute as undefined.
@@ -1539,7 +1555,7 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 	xor	dl, 0x80	; DX = SSSSSSSSxyBBBBBB, xy = ~SS^JJ
 .j2:	add	rlo(15), bx	; PC += #imm24:0
 	adc	rhi(15), dx
-	ret
+	jmp	updatePC	; update PC cache if needed
 
 	; 111101111111AAAA 1010AAAAAAAAAAAA UDF #imm16
 	; and other undefined instructions
@@ -1905,6 +1921,27 @@ seglin:	mov	cl, 4
 	adc	dx, 0		; apply carry
 	ret
 
+	; Translate the address in rhi(15) and fill in pchi, pcseg, and
+	; pcldrh.  Returns pcldrh in BX, pcseg in CX.  Preserves all other
+	; registers.
+ifetchtail:			; entry point when coming from ifetch
+	inc	word rhi(15)	; apply carry from rlo(15)
+fixPC:	mov	cx, rhi(15)	; high part of PC for translation
+.update:mov	[bp+pchi], cx	; remember it
+	call	translate	; BX: handler structure, CX: high part of addr
+	mov	[bp+pcseg], cx	; remember high part of address
+	mov	bx, [bx+mem.ldrh] ; retrieve ldrh accessor function
+	mov	[bp+pcldrh], bx	; remember ldrh accessor function
+	ret
+
+	; Same as fixPC, but first check if the cache is up to do
+	; no guarantees about the return value are given.
+updatePC:
+	mov	cx, rhi(15)	; high part of PC
+	cmp	cx, [bp+pchi]	; is the cache up to date?
+	jne	fixPC.update	; if not, update it!
+	ret			; otherwise return without doing anything
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Exceptions, Events, and Interrupts                                         ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1921,7 +1958,10 @@ undefined:
 	sub	word rlo(15), 2	; roll PC back to the current instruction
 	sbb	word rhi(15), 0
 	call	hB701		; dump register contents
-	call	ifetch		; load current instruction
+	call	fixPC		; set up translation tables for old PC
+	mov	si, rlo(15)	; load low half of PC
+	dec	si		; clear thumb bit
+	call	bx
 	mov	di, undmsg.insn	; convert instruction to hex
 	call	tohex
 	mov	si, undmsg
