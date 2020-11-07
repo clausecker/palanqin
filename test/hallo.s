@@ -10,15 +10,7 @@ _start:	bl	hell
 	adr	r1, string
 	bl	puts
 	bl	indexd
-	adr	r1, crlf
-	bl	puts
-	sub	sp, #20
-	mov	r1, sp
-	stmia	r1!, {r3-r7}
-	subs	r1, #20
-	bl	puts
-	add	sp, #20
-	bye
+	b	rest
 
 hell:	ldr	r0, =0x6c6c6548	@ 'Hell'
 	emit
@@ -78,6 +70,17 @@ indexd:	movs	r0, #0
 	mov	r1, sp
 	bl	puts
 	pop	{r3-r7, pc}	@ pop string off stack and return
+
+	@ remaining code (to exercise B #imm11)
+rest:	adr	r1, crlf
+	bl	puts
+	sub	sp, #20
+	mov	r1, sp
+	stmia	r1!, {r3-r7}
+	subs	r1, #20
+	bl	puts
+	add	sp, #20
+	bye
 
 	.balign	4
 string:	.string	"\r\nJedem Anfang wohnt ein Zauber inne.\r\n"

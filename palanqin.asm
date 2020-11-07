@@ -1508,12 +1508,10 @@ h1101xxxx:
 	; 11101XXXXXXXXXXX 32-bit instructions
 h1110:	test	ax, 0x0800	; is this B #imm11?
 	jnz	.udf		; or is it a 32 bit instruction?
-	mov	cl, 5		; sign extend #imm11 into AX
-	shl	ax, cl		; AX=CCCCCCCCCCC00000
-	dec	cx		; keep #imm11 as a word offset
-	sar	ax, cl		; AX=CCCCCCCCCCCCCCC0
-	inc	ax		; AX = #imm11 + 2
-	inc	ax
+	add	ax, 0x1c00	; AX = ccccccCCCCCCCCCC (c = complemented sign)
+	xor	ax, 0xfc00	; AX = CCCCCCCCCCCCCCCC (imm11>>1 sign extended)
+	inc	ax		; AX = #imm11 >> 1 + 1
+	shl	ax, 1		; AX = #imm11 + 2
 	cwd			; DX:AX = #imm11 + 2
 	add	rlo(15), ax	; R15 += #imm11 + 2
 	adc	rhi(15), dx
