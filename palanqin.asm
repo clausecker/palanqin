@@ -490,6 +490,16 @@ ht0101	dw	str		; 0101000 STR   Rt, [Rn, Rm]
 	dw	ldrb		; 0101110 LDRB  Rt, [Rn, Rm]
 	dw	ldrsh		; 0101111 LDRSH Rt, [Rn, Rm]
 
+	; jump table for load/store immediate offset
+ht011	dw	strh		; 10000 STRH Rt, [Rn, #imm5]
+	dw	ldrh		; 10001 LDRH Rt, [Rn, #imm5]
+	dw	undefined
+	dw	undefined
+	dw	str		; 01100 STR  Rt, [Rn, #imm5]
+	dw	ldr		; 01101 LDR  Rt, [Rn, #imm5]
+	dw	strb		; 01110 STRB Rt, [Rn, #imm5]
+	dw	ldrb		; 01111 LDRB Rt, [Rn, #imm5]
+
 	; jump table for the miscellaneous instructions 1011XXXX
 	; instructions in parentheses are not available on Cortex-M0
 	; cores and generate an undefined instruction exception.
@@ -1073,11 +1083,16 @@ h0101:	mov	al, ah		; AL = 0101XXXA
 	pop	bx		; BX = 0000XXX0
 	jmp	[ht0101+bx]	; perform instruction behavior
 
+
+	; load/store immediate offset
 	; 01100AAAAABBBCCC STR	Rt, [Rn, #imm5]
 	; 01110AAAAABBBCCC STRB Rt, [Rn, #imm5]
 	; 01101AAAAABBBCCC LDR  Rt, [Rn, #imm5]
 	; 01111AAAAABBBCCC LDRB Rt, [Rn, #imm5]
+	; 10000AAAAABBBCCC STRH Rt, [Rn, #imm5]
+	; 10001AAAAABBBCCC LDRH Rt, [Rn, #imm5]
 	aligncc
+h1000:
 h011:	mov	si, [bp+oprB]	; SI = &Rn
 	mov	di, [bp+oprC]	; DI = &Rt
 	xchg	dx, ax		; DX = instruction
@@ -1085,40 +1100,20 @@ h011:	mov	si, [bp+oprB]	; SI = &Rn
 	mov	bx, [bp+oprA]	; BX = #imm5
 	lodsw			; CX:AX = Rn
 	mov	cx, [si]
-	test	dh, 0x10	; byte instruction?
-	jnz	.b		; if not, scale immediate
-	shl	bx, 1		; BX = #imm5 << 2
-	shl	bx, 1
-.b:	add	ax, bx		; CX:AX = Rn + #imm5 << 2
-	adc	cx, 0
-	test	dh, 0x08	; is this LDR(B)?
-	jz	.str		; otherwise it is STR(B)
-	test	dh, 0x10	; is this LDR or LDRB?
-	jnz	.ldrb
-	jmp	ldr
-.ldrb:	jmp	ldrb
-.str:	test	dh, 0x10	; is this STR or STRB?
-	jnz	.strb
-	jmp	str
-.strb:	jmp	strb
 
-	; 10000AAAAABBBCCC STRH Rt, [Rn, #imm5]
-	; 10001AAAAABBBCCC LDRH Rt, [Rn, #imm5]
-	aligncc
-h1000:	mov	si, [bp+oprB]	; SI = &Rn
-	mov	di, [bp+oprC]	; DI = &Rt
-	xchg	dx, ax		; DX = instruction
-	fixRd			; fix flags on Rt
-	mov	bx, [bp+oprA]	; BX = #imm5
-	shl	bx, 1		; BX = #imm5 << 1
-	lodsw			; CX:AX = Rn
-	mov	cx, [si]
-	add	ax, bx		; CX:AX = Rn + #imm5 << 1
+	; adjust immediate for data size
+	test	dh, 0x90
+	js	.h		; 1XXXXXXX -> ldrh/strh
+	jnz	.b		; 0XX1XXXX -> ldrb/strb
+	shl	bx, 1		; otherwise it's ldr/str
+.h:	shl	bx, 1
+.b:	add	ax, bx		; CX:AX = Rn + #imm5
 	adc	cx, 0
-	test	dh, 0x08	; LDRH?
-	jz	.strh		; otherwise it is STRH
-	jmp	ldrh
-.strh:	jmp	strh
+	mov	bl, dh		; BX = 00000000 XXXXXAAA
+	and	bl, 0x38	; BX = 00000000 00XXX000
+	shr	bx, 1		; prepare index
+	shr	bx, 1
+	jmp	[ht011+bx]	; perform load/store
 
 	; 10010BBBCCCCCCCC STR Rd, [SP, #imm8]
 	; 10011BBBCCCCCCCC LDR Rd, [SP, #imm8]
