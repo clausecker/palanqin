@@ -491,14 +491,14 @@ ht0101	dw	str		; 0101000 STR   Rt, [Rn, Rm]
 	dw	ldrsh		; 0101111 LDRSH Rt, [Rn, Rm]
 
 	; jump table for load/store immediate offset
-ht011	dw	strh		; 10000 STRH Rt, [Rn, #imm5]
-	dw	ldrh		; 10001 LDRH Rt, [Rn, #imm5]
+ht011	dw	strhimm		; 10000 STRH Rt, [Rn, #imm5]
+	dw	ldrhimm		; 10001 LDRH Rt, [Rn, #imm5]
 	dw	undefined
 	dw	undefined
-	dw	str		; 01100 STR  Rt, [Rn, #imm5]
-	dw	ldr		; 01101 LDR  Rt, [Rn, #imm5]
-	dw	strb		; 01110 STRB Rt, [Rn, #imm5]
-	dw	ldrb		; 01111 LDRB Rt, [Rn, #imm5]
+	dw	strimm		; 01100 STR  Rt, [Rn, #imm5]
+	dw	ldrimm		; 01101 LDR  Rt, [Rn, #imm5]
+	dw	strbimm		; 01110 STRB Rt, [Rn, #imm5]
+	dw	ldrbimm		; 01111 LDRB Rt, [Rn, #imm5]
 
 	; jump table for the miscellaneous instructions 1011XXXX
 	; instructions in parentheses are not available on Cortex-M0
@@ -1093,22 +1093,12 @@ h0101:	mov	bl, ah		; BL = 0101XXXA
 h1000:
 h011:	mov	si, [bp+oprB]	; SI = &Rn
 	mov	di, [bp+oprC]	; DI = &Rt
-	xchg	dx, ax		; DX = instruction
+	xchg	bx, ax		; BX = instruction
 	fixRd			; fix flags on Rt
-	mov	bx, [bp+oprA]	; BX = #imm5
-	lodsw			; CX:AX = Rn
-	mov	cx, [si]
-
-	; adjust immediate for data size
-	test	dh, 0x90
-	js	.h		; 1XXXXXXX -> ldrh/strh
-	jnz	.b		; 0XX1XXXX -> ldrb/strb
-	shl	bx, 1		; otherwise it's ldr/str
-.h:	shl	bx, 1
-.b:	add	ax, bx		; CX:AX = Rn + #imm5
-	adc	cx, 0
-	mov	bl, dh		; BX = 00000000 XXXXXAAA
-	and	bl, 0x38	; BX = 00000000 00XXX000
+	mov	ax, [bp+oprA]	; CX:AX = #imm5
+	xor	cx, cx
+	mov	bl, bh		; BX = 00000000 XXXXXAAA
+	and	bx, 0x38	; BX = 00000000 00XXX000
 	shr	bx, 1		; prepare index
 	shr	bx, 1
 	jmp	[ht011+bx]	; perform load/store
@@ -1920,9 +1910,18 @@ ldstnone:
 	mov	dx, ax
 	ret
 
+	; scale immediate in CX:AX by 4, add to source address in [SI]
+	; and then perform ldr effect
+	aligncc
+ldrimm:	shl	ax, 1		; scale immediate
+	shl	ax, 1
+	add	ax, [si]
+	adc	cx, [si+2]
+	; fallthrough
+
 	; load word from ARM address CX:AX and deposit into the register
 	; pointed to by DI.  Preserve DI.
-	aligncc
+	align	2
 ldr:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldr]	; DX:AX = mem[CX:SI]
@@ -1930,9 +1929,17 @@ ldr:	call	translate	; CX:AX: translated address, BX: handler
 	mov	[di+hi], dx
 	ret
 
+	; scale immediate in CX:AX by 2, add to source address in [SI]
+	; and then perform ldrh effect
+	aligncc
+ldrhimm:shl	ax, 1		; scale immediate
+	add	ax, [si]
+	adc	cx, [si+2]
+	; fallthrough
+
 	; load halfword from ARM address CX:AX and deposit into the register
 	; pointed to by DI.
-	aligncc
+	align	2
 ldrh:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldrh]	; AX = mem[CX:SI]
@@ -1952,9 +1959,15 @@ ldrsh:	call	translate	; CX:AX: translated address, BX: handler
 	mov	[di], dx
 	ret
 
+	; add source address in [SI] to CX:AX, then perform ldrb effect
+	aligncc
+ldrbimm:add	ax, [si]
+	adc	cx, [si+2]
+	; fallthrough
+
 	; load byte from ARM address CX:AX, zero-extend and deposit into the
 	; register pointed to by DI.
-	aligncc
+	align	2
 ldrb:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	call	[bx+mem.ldrb]	; AL = mem[CX:SI]
@@ -1976,24 +1989,47 @@ ldrsb:	call	translate	; CX:AX: translated address, BX: handler
 	mov	[di], dx
 	ret
 
+	; scale immediate in CX:AX by 4, add to source address in [SI]
+	; and then perform str effect
+	aligncc
+strimm:	shl	ax, 1		; scale immediate
+	shl	ax, 1
+	add	ax, [si]
+	adc	cx, [si+2]
+	; fallthrough
+
 	; store word from register pointed to by DI to ARM address CX:AX.
 	; Preserve DI.
-	aligncc
+	align	2
 str:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	mov	ax, [di]	; DX:AX = Rt
 	mov	dx, [di+hi]
 	jmp	[bx+mem.str]
 
-	; store halfword from register pointed to by DI to ARM address CX:AX.
+	; scale immediate in CX:AX by 2, add to source address in [SI]
+	; and then perform strh effect
 	aligncc
+strhimm:shl	ax, 1		; scale immediate
+	add	ax, [si]
+	adc	cx, [si+2]
+	; fallthrough
+
+	; store halfword from register pointed to by DI to ARM address CX:AX.
+	align	2
 strh:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	mov	ax, [di]	; AX = Rt
 	jmp	[bx+mem.strh]
 
-	; store byte from register pointed to by DI to ARM address CX:AX.
+	; add CX:AX to source address in [SI], then perform strb effect
 	aligncc
+strbimm:add	ax, [si]
+	adc	cx, [si+2]
+	; fallthrough
+
+	; store byte from register pointed to by DI to ARM address CX:AX.
+	align	2
 strb:	call	translate	; CX:AX: translated address, BX: handler
 	xchg	ax, si		; CX:SI = CX:AX
 	mov	al, [di]	; AL = Rt
