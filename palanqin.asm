@@ -33,7 +33,7 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 %endmacro
 
 	; compare DI with [bp+zsreg].  If both are equal, fix the flags.
-	; trashes AX and BX.  Preserves DI which may not be zero.
+	; Trashes AX, preserves all other registers.
 	; the intent is to save the flags if Rd == [bp+zsreg] and flag
 	; recovery would otherwise be impossible.
 %macro	fixRd	0
@@ -1069,9 +1069,8 @@ h01000111:
 
 	; 0101XXXAAABBBCCC load/store register offset
 	aligncc
-h0101:	mov	al, ah		; AL = 0101XXXA
-	and	ax, 0x0e	; AX = 0000XXX0
-	push	ax		; remember for later
+h0101:	mov	bl, ah		; BL = 0101XXXA
+	and	bx, 0x0e	; BX = 0000XXX0
 	mov	di, [bp+oprC]	; DI = &Rt
 	fixRd			; fix flags for Rt
 	mov	si, [bp+oprB]	; SI = &Rn
@@ -1080,7 +1079,6 @@ h0101:	mov	al, ah		; AL = 0101XXXA
 	mov	si, [bp+oprA]	; SI = &rm
 	add	ax, [si]	; CX:AX = Rn + Rm
 	adc	cx, [si+hi]
-	pop	bx		; BX = 0000XXX0
 	jmp	[ht0101+bx]	; perform instruction behavior
 
 
@@ -1207,10 +1205,9 @@ h10110010:
 	mov	cl, 4
 	shr	ax, cl		; AX = 0000 0### #### XXXB
 	and	ax, 0xe		; AX = 0000 0000 0000 XXX0
-	push	ax		; save AX around fixRd
+	xchg	ax, bx		; move XXX field to BX for jump
 	fixRd			; set flags on Rd if needed
 	lodsw			; AX = Rm(lo), SI += 2
-	pop	bx		; BX = 0000 XXX0
 	jmp	[htB2BA+bx]	; perform instruction handler
 
 	; 1011001000AAABBB SXTH Rd, Rm
@@ -1404,14 +1401,14 @@ h10111111:
 
 	aligncc
 h1100:	push	ax		; remember the instruction on the stack
-	xchg	ax, di		; and in DI
+	xchg	ax, bx		; and in BX
 	call	fixflags	; fix flags unconditionally as it is too
 				; complicated to determine if we need to or not
 	mov	si, [bp+oprB]	; SI = &Rn
 	push	si		; remember a copy of &Rn
 	lodsw			; CX:AX = Rn
 	mov	cx, [si]
-	test	di, 0x0800	; is this a load or is it a store?
+	test	bx, 0x0800	; is this a load or is it a store?
 	lea	di, rlo(0)	; DI = &R0
 	jnz	h11001
 	; fall through to h11000
@@ -1476,11 +1473,11 @@ h1101:	mov	cl, ah		; CL = 1101AAAA
 	shl	al, 1		; AL = 01AAAA00
 	cbw			; AX = 01AAAA00
 	add	ax, h1101xxxx-0x40
-	xchg	di, ax		; DI = h1101xxxx[AAAA]
+	xchg	bx, ax		; DI = h1101xxxx[AAAA]
 	call	fixflags	; set up true flags in flags
 	push	word [bp+flags]
 	popf			; set up SF, OF, ZF, and CF according to flags
-	jmp	di
+	jmp	bx
 
 	; conditional branch jump table.  Each entry is four bytes long and
 	; corresponds to one conditional code.  If the jump is not taken, the
@@ -1676,21 +1673,20 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 	; set ZF and SF in flags according to zsreg
-	; trashes AX and BX
+	; trashes AX and DI.
 	aligncc
 fixflags:
-	mov	bx, [bp+zsreg]
-	test	bx, bx		; flags already fixed?
-	jnz	.fix
+	mov	di, [bp+zsreg]
+	test	di, di		; flags already fixed?
+	jnz	.entry
 	ret			; if yes, there's nothing left to do
 
 	; fixRd entry point
 	aligncc
-.entry:	mov	bx, di		; we have DI == [bp+zsreg] here
-.fix:	mov	ax, [bx]	; ax = zsreg(lo)
+.entry:	mov	ax, [di]	; ax = zsreg(lo)
 	or	al, ah		; make sure LSB of AH is accounted for
 	shr	ah, 1		; clear MSB of AX, destroy LSB of AH
-	or	ax, [bx+hi]	; set SF and ZF on zsreg
+	or	ax, [di+hi]	; set SF and ZF on zsreg
 	lahf			; AH = SF, ZF according to zsreg
 	mov	al, [bp+flags]
 	and	ax, (ZF|SF)<<8|~(ZF|SF)&0xff
