@@ -46,10 +46,11 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 	; load one instruction into AX and advance PC past it.
 	; trashes BX, CX, and SI.  Assumes the PC cache is set up correctly.
 %macro	ifetch	0
-	mov	cx, [bp+pcseg]	; load translated PC segment
 	mov	si, rlo(15)	; load offset
 	dec	si		; clear thumb bit
-	call	[bp+pcldrh]	; load instruction from memory
+	mov	cx, es		; remember old DS
+	mov	es, [bp+pcseg]	; load translated PC segment
+	call	[bp+pcldrh]	; load instruction from memory (sets ES=CX)
 	add	word rlo(15), 2	; PC += 2
 	jnc	%%nofix		; fix PC cache if rhi(15) changes
 	call	ifetchtail
@@ -1697,8 +1698,8 @@ fixflags:
 	; by the caller to perform multiple memory accesses on related
 	; addresses, but once it overflows, translate must be called anew.
 	; Expects an ARM address high word in CX.  Returns a translated segment
-	; in CX and a pointer to a structure of accessor functions in BX.
-	; Preserves all other registers.
+	; in ES and a pointer to a structure of accessor functions in BX.
+	; Sets CX to the original value of ES.  Trashes SI.
 	section	.text
 	aligncc
 translate:
@@ -1732,49 +1733,54 @@ xlttab:	dw	xltadj		; 00000000--000fffff adjusted memory
 	; translator for imgbase adjusted memory
 	section	.text
 	aligncc
-xltadj:	xchg	si, cx		; preserve old SI
+xltadj:	mov	si, cx		; preserve old SI
+	mov	cx, es		; save old ES
 	shl	si, 1		; form a table index
 	and	si, 0x001e	; mask out relevant nibble
-	mov	si, [bp+si+mmadj] ; translate address
-	xchg	cx, si		; restore SI and move address to CX
+	mov	es, [bp+si+mmadj] ; translate address
 	mov	bx, memmem	; load accessor function address
 	ret
 
 	; translator for unadjusted memory
 	aligncc
-xltraw:	xchg	si, cx		; preserve old SI
+xltraw:	mov	si, cx		; preserve old SI
+	mov	cx, es		; save old ES
 	shl	si, 1		; form a table index
 	and	si, 0x001e	; mask out relevant nibble
-	mov	si, [bp+si+mmraw] ; translate address
-	xchg	cx, si		; restore SI and move address to CX
+	mov	es, [bp+si+mmraw] ; translate address
 	mov	bx, memmem	; load accessor function address
 	ret
 
 	; translator for I/O ports
 	aligncc
-xltio:	mov	bx, memio	; I/O memory access
+xltio:	mov	cx, es		; save ES
+	mov	bx, memio	; I/O memory access
 	ret
 
 	; translator for open bus
 	aligncc
-xltnone:mov	bx, memnone	; no memory access
+xltnone:mov	cx, es		; save ES
+	mov	bx, memnone	; no memory access
 	ret
 
 	; translator for the private peripheral bus (PPB)
 	aligncc
-xltppb:	todo
+xltppb:	mov	cx, es		; save ES
+	todo
 
 	; translator for the vendor-use area
 	aligncc
 xltvendor:
+	mov	cx, es		; save ES
 	todo
 
 	; Memory accessor functions.  These functions all follow the same
-	; convention: CX:SI holds the translated address, DX:AX holds the datum
-	; to be written (in case of a store function).  On return, DX:AX holds
-	; the datum loaded (in case of a load function).  In case of a store
-	; function, DX:AX is undefined on return.  The function preserves CX:SI
-	; as well as all segment registers.  The caller is responsible for
+	; convention: DS:SI holds the translated address, DX:AX holds the datum
+	; to be written (in case of a store function) and CX holds the old value
+	; of DS.  On return, DX:AX holds the datum loaded (in case of a load
+	; function).  In case of a store function, DX:AX is undefined on return.
+	; The function preserves CX:SI as well as all segment registers except
+	; for DS (which is restored from CX).  The caller is responsible for
 	; checking for alignment problems.
 	struc	mem
 .ldr	resw	1		; load word
@@ -1808,52 +1814,40 @@ memnone	times	6 dw ldstnone
 	; load word from memory
 	section	.text
 	aligncc
-ldrmem:	push	ds		; remember old DS
-	mov	ds, cx		; set up DS for DS:SI memory load
-	mov	ax, [si]	; DX:AX = [CX:SI]
-	mov	dx, [si+2]
-	pop	ds		; restore DS
+ldrmem:	mov	ax, [es:si]	; DX:AX = [ES:SI]
+	mov	dx, [es:si+2]
+	mov	es, cx		; restore ES
 	ret
 
 	; load half word from memory
 	aligncc
-ldrhmem:mov	dx, ds		; remember old DS
-	mov	ds, cx		; set up DS for DS:SI memory load
-	mov	ax, [si]	; AX = [CX:SI]
-	mov	ds, dx		; restore DS
+ldrhmem:mov	ax, [es:si]	; AX = [ES:SI]
+	mov	es, cx		; restore ES
 	ret
 
 	; load byte from memory
 	aligncc
-ldrbmem:mov	dx, ds		; remember old DS
-	mov	ds, cx		; set up DS for DS:SI memory load
-	mov	al, [si]	; AL = [CX:SI]
-	mov	ds, dx		; restore DS
+ldrbmem:mov	al, [es:si]	; AL = [ES:SI]
+	mov	es, cx		; restore ES
 	ret
 
 	; store word to memory
 	aligncc
-strmem:	push	ds		; remember old DS
-	mov	ds, cx		; set up DS for DS:SI store
-	mov	[si], ax	; [CX:SI] = AX:DX
-	mov	[si+2], dx
-	pop	ds
+strmem:	mov	[es:si], ax	; [ES:SI] = AX:DX
+	mov	[es:si+2], dx
+	mov	es, cx		; restore ES
 	ret
 
 	; store half word to memory
 	aligncc
-strhmem:mov	dx, ds		; remember old DS
-	mov	ds, cx		; set up DS for DS:SI store
-	mov	[si], ax	; [CX:SI] = AX
-	mov	ds, dx		; restore old DS
+strhmem:mov	[es:si], ax	; [ES:SI] = AX
+	mov	es, cx		; restore ES
 	ret
 
 	; store byte to memory
 	aligncc
-strbmem:mov	dx, ds		; remember old DS
-	mov	ds, cx		; set up DS for DS:SI store
-	mov	[si], al	; [CX:SI] = AL
-	mov	ds, dx		; restore old DS
+strbmem:mov	[es:si], al	; [ES:SI] = AL
+	mov	es, cx		; restore ES
 	ret
 
 	; load word from I/O port
@@ -1866,18 +1860,21 @@ ldrio:	mov	dx, si		; set up DX for IN instruction
 	in	ax, dx		; load high word
 	xchg	ax, dx		; move high word to dx
 	pop	ax		; restore low word
+	mov	es, cx		; restore ES
 	ret
 
 	; load half word from I/O port
 	aligncc
 ldrhio:	mov	dx, si		; set up DX for IN instruction
 	in	ax, dx		; load word
+	mov	es, cx		; restore ES
 	ret
 
 	; load byte from I/O port
 	aligncc
 ldrbio:	mov	dx, si		; set up DX for IN instruction
 	in	al, dx		; load byte
+	mov	es, cx		; restore ES
 	ret
 
 	; store word to I/O port
@@ -1889,18 +1886,21 @@ strio:	push	dx		; temporarily remember high word
 	inc	dx
 	pop	ax		; load high word
 	out	dx, ax		; store high word
+	mov	es, cx		; restore ES
 	ret
 
 	; store half word to I/O port
 	aligncc
 strhio:	mov	dx, si		; set up DX for OUT instruction
 	out	dx, ax		; store word
+	mov	es, cx		; restore ES
 	ret
 
 	; store byte to I/O port
 	aligncc
 strbio:	mov	dx, si		; set up DX for OUT instruction
 	out	dx, al		; store byte
+	mov	es, cx		; restore ES
 	ret
 
 	; store nothing/load 0xffffffff
@@ -1908,6 +1908,7 @@ strbio:	mov	dx, si		; set up DX for OUT instruction
 ldstnone:
 	mov	ax, 0xffff	; DX:AX = -1
 	mov	dx, ax
+	mov	es, cx		; restore ES
 	ret
 
 	; scale immediate in CX:AX by 4, add to source address in [SI]
@@ -1922,10 +1923,10 @@ ldrimm:	shl	ax, 1		; scale immediate
 	; load word from ARM address CX:AX and deposit into the register
 	; pointed to by DI.  Preserve DI.
 	align	2
-ldr:	call	translate	; CX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = CX:AX
-	call	[bx+mem.ldr]	; DX:AX = mem[CX:SI]
-	mov	[di], ax	; Rt = mem[CX:SI]
+ldr:	call	translate	; ES:AX: translated address, BX: handler
+	xchg	ax, si		; ES:SI = DS:AX, CX = CS
+	call	[bx+mem.ldr]	; DX:AX = mem[ES:SI], ES = CX
+	mov	[di], ax	; Rt = mem[ES:SI]
 	mov	[di+hi], dx
 	ret
 
@@ -1940,10 +1941,10 @@ ldrhimm:shl	ax, 1		; scale immediate
 	; load halfword from ARM address CX:AX and deposit into the register
 	; pointed to by DI.
 	align	2
-ldrh:	call	translate	; CX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = CX:AX
-	call	[bx+mem.ldrh]	; AX = mem[CX:SI]
-	stosw			; Rt = mem[CX:SI]
+ldrh:	call	translate	; ES:AX: translated address, BX: handler
+	xchg	ax, si		; ES:SI = ES:AX, CX = CS
+	call	[bx+mem.ldrh]	; AX = mem[ES:SI], ES = CX
+	stosw			; Rt = mem[ES:SI]
 	xor	ax, ax
 	stosw
 	ret
@@ -1951,11 +1952,11 @@ ldrh:	call	translate	; CX:AX: translated address, BX: handler
 	; load signed halfword from ARM address CX:AX and deposit into the
 	; the register pointed to by DI.
 	aligncc
-ldrsh:	call	translate	; CX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = CX:AX
-	call	[bx+mem.ldrh]	; AX = mem[CX:SI]
-	cwd			; DX:AX = mem[CX:SI]
-	stosw			; Rt = mem[CX:SI] (sign extended)
+ldrsh:	call	translate	; ES:AX: translated address, BX: handler
+	xchg	ax, si		; ES:SI = ES:AX, CX = CS
+	call	[bx+mem.ldrh]	; AX = mem[ES:SI], ES = CX
+	cwd			; DX:AX = mem[ES:SI]
+	stosw			; Rt = mem[ES:SI] (sign extended)
 	mov	[di], dx
 	ret
 
@@ -1968,10 +1969,10 @@ ldrbimm:add	ax, [si]
 	; load byte from ARM address CX:AX, zero-extend and deposit into the
 	; register pointed to by DI.
 	align	2
-ldrb:	call	translate	; CX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = CX:AX
-	call	[bx+mem.ldrb]	; AL = mem[CX:SI]
-	stosb			; Rt = mem[CX:SI]
+ldrb:	call	translate	; ES:AX: translated address, BX: handler
+	xchg	ax, si		; ES:SI = ES:AX, CX = CS
+	call	[bx+mem.ldrb]	; AL = mem[ES:SI], ES = CX
+	stosb			; Rt = mem[ES:SI]
 	xor	ax, ax
 	stosb
 	stosw
@@ -1980,12 +1981,13 @@ ldrb:	call	translate	; CX:AX: translated address, BX: handler
 	; load signed byte from ARM address CX:AX and deposit into the
 	; the register pointed to by DI.
 	aligncc
-ldrsb:	call	translate	; CX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = CX:AX
-	call	[bx+mem.ldrb]	; AL = mem[CX:SI]
-	cbw			; AX = mem[CX:SI]
-	cwd			; DX:AX = mem[CX:SI]
-	stosw			; Rt = mem[CX:SI] (sign extended)
+ldrsb:	call	translate	; ES:AX: translated address, BX: handler
+	xchg	ax, si		; ES:SI = ES:AX, CX = CS
+	call	[bx+mem.ldrb]	; AL = mem[ES:SI], ES = CX
+	pop	ds		; restore DS
+	cbw			; AX = mem[ES:SI]
+	cwd			; DX:AX = mem[ES:SI]
+	stosw			; Rt = mem[ES:SI] (sign extended)
 	mov	[di], dx
 	ret
 
@@ -2001,11 +2003,11 @@ strimm:	shl	ax, 1		; scale immediate
 	; store word from register pointed to by DI to ARM address CX:AX.
 	; Preserve DI.
 	align	2
-str:	call	translate	; CX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = CX:AX
+str:	call	translate	; ES:AX: translated address, BX: handler
+	xchg	ax, si		; ES:SI = ES:AX, CX = CS
 	mov	ax, [di]	; DX:AX = Rt
 	mov	dx, [di+hi]
-	jmp	[bx+mem.str]
+	jmp	[bx+mem.str]	; perform store, restore ES
 
 	; scale immediate in CX:AX by 2, add to source address in [SI]
 	; and then perform strh effect
@@ -2017,10 +2019,10 @@ strhimm:shl	ax, 1		; scale immediate
 
 	; store halfword from register pointed to by DI to ARM address CX:AX.
 	align	2
-strh:	call	translate	; CX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = CX:AX
+strh:	call	translate	; ES:AX: translated address, BX: handler
+	xchg	ax, si		; ES:SI = ES:AX, CX = CS
 	mov	ax, [di]	; AX = Rt
-	jmp	[bx+mem.strh]
+	jmp	[bx+mem.strh]	; perform store, restore ES
 
 	; add CX:AX to source address in [SI], then perform strb effect
 	aligncc
@@ -2030,10 +2032,10 @@ strbimm:add	ax, [si]
 
 	; store byte from register pointed to by DI to ARM address CX:AX.
 	align	2
-strb:	call	translate	; CX:AX: translated address, BX: handler
-	xchg	ax, si		; CX:SI = CX:AX
+strb:	call	translate	; ES:AX: translated address, BX: handler
+	xchg	ax, si		; ES:SI = ES:AX, CX = CS
 	mov	al, [di]	; AL = Rt
-	jmp	[bx+mem.strb]
+	jmp	[bx+mem.strb]	; perform store, restore ES
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Address Space Conversion                                                   ;;
@@ -2067,7 +2069,8 @@ ifetchtail:			; entry point when coming from ifetch
 fixPC:	mov	cx, rhi(15)	; high part of PC for translation
 .update:mov	[bp+pchi], cx	; remember it
 	call	translate	; BX: handler structure, CX: high part of addr
-	mov	[bp+pcseg], cx	; remember high part of address
+	mov	[bp+pcseg], es	; remember high part of address
+	mov	es, cx		; restore es
 	mov	bx, [bx+mem.ldrh] ; retrieve ldrh accessor function
 	mov	[bp+pcldrh], bx	; remember ldrh accessor function
 	ret
