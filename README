@@ -7,6 +7,20 @@ program known to work with it is Mecrisp Stellaris in the upcoming
 2.5.4b release.  All of its aspects are subject to change and cannot be
 expected to remain stable.
 
+# Examples
+
+An example program is provided in contrib/advent.  Make sure a copy of
+the gcc-arm-embedded toolchain is provided in your PATH and then type
+
+    cd contrib/advent; sh build.sh
+
+to compile it.  Then, open a DOSBOX in the project root directory and
+type
+
+    PALANQIN CONTRIB\ADVENT\ADVENT.IMG
+
+to run the advent binary.
+
 # Register contents on reset:
 
 R0:  program image base address
