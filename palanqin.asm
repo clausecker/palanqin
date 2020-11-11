@@ -241,6 +241,10 @@ pchi	resw	1		; high PC word currently translated
 pcseg	resw	1		; translated segment corresponding to pchi
 pcldrh	resw	1		; ldrh accessor function for pchi
 
+	; instrumentation
+insns	resw	2		; number of instructions executed
+pcinval	resw	2		; PC cache invalidation count
+
 	; Memory maps.  The high word of an ARM address sans the address space
 	; nibble is looked up in this table to form a segment.  The low word
 	; stays the same, forming an offset.
@@ -272,6 +276,8 @@ run:	push	cs		; set up es = ds = cs
 	; simulate one instruction.  Assumes ES=DS=CS.
 	aligncc
 step:	ifetch			; fetch instruction
+	add	word [bp+insns], 1 ; increment instruction count
+	adc	word [bp+insns+2], 0
 	push	ax		; push a copy of the current instruction
 	mov	bx, ax		; and keep another one in AX
 	mov	cl, 5		; mask out the instruction's top 4 bits
@@ -2073,6 +2079,8 @@ fixPC:	mov	cx, rhi(15)	; high part of PC for translation
 	mov	es, cx		; restore ES
 	mov	bx, [bx+mem.ldrh] ; retrieve ldrh accessor function
 	mov	[bp+pcldrh], bx	; remember ldrh accessor function
+	add	word [bp+pcinval], 1 ; increment invalidation count
+	adc	word [bp+pcinval+2], 0
 	ret
 
 	; Same as fixPC, but first check if the cache is up to do
@@ -2127,6 +2135,30 @@ htB7	dw	hB700		; terminate emulation
 	dw	hB705		; perform DOS interrupt
 B7max	equ	($-htB7-2)/2	; highest escape hatch number used
 
+	; statistics
+	section	.data
+stats	db 13, 10
+.insns	db "XXXXXXXX instructions", 13, 10
+.inval	db "XXXXXXXX PC cache invalidations", 13, 10, 0
+
+	; b700 terminate emulation
+	section	.text
+hB700:	mov	di, stats.insns
+	mov	ax, [bp+insns+2]
+	call	tohex
+	mov	ax, [bp+insns]
+	call	tohex
+	mov	di, stats.inval
+	mov	ax, [bp+pcinval+2]
+	call	tohex
+	mov	ax, [bp+pcinval]
+	call	tohex
+	mov	si, stats
+	call	puts
+	mov	al, rlo(0)	; AL = R0(lo) (error level)
+	mov	ah, 0x4c
+	int	0x21		; 0x4c: TERMINATE PROGRAM
+
 	; register dump template
 	section	.data
 dump	db	"R0  "
@@ -2138,12 +2170,6 @@ dump	db	"R0  "
 	db	"R12 XXXXXXXX  SP  XXXXXXXX  LR  XXXXXXXX  PC  XXXXXXXX", 13, 10
 .endr	db	"NZCV  "
 .nzcv	db	"----", 13, 10, 0
-
-	; b700 terminate emulation
-	section	.text
-hB700:	mov	al, rlo(0)	; AL = R0(lo) (error level)
-	mov	ah, 0x4c
-	int	0x21		; 0x4c: TERMINATE PROGRAM
 
 	; b701 dump registers
 hB701:	call	fixflags	; set up flags
