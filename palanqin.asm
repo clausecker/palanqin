@@ -244,6 +244,7 @@ pcldrh	resw	1		; ldrh accessor function for pchi
 	; instrumentation
 insns	resw	2		; number of instructions executed
 pcinval	resw	2		; PC cache invalidation count
+pcupdt	resw	2		; number of times updatePC has been called
 
 	; Memory maps.  The high word of an ARM address sans the address space
 	; nibble is looked up in this table to form a segment.  The low word
@@ -2083,10 +2084,12 @@ fixPC:	mov	cx, rhi(15)	; high part of PC for translation
 	adc	word [bp+pcinval+2], 0
 	ret
 
-	; Same as fixPC, but first check if the cache is up to do
+	; Same as fixPC, but first check if the cache is up to date
 	; no guarantees about the return value are given.
 	aligncc
 updatePC:
+	add	word [bp+pcupdt], 1
+	adc	word [bp+pcupdt+2], 0
 	mov	cx, rhi(15)	; high part of PC
 	cmp	cx, [bp+pchi]	; is the cache up to date?
 	jne	fixPC.update	; if not, update it!
@@ -2139,7 +2142,8 @@ B7max	equ	($-htB7-2)/2	; highest escape hatch number used
 	section	.data
 stats	db 13, 10
 .insns	db "XXXXXXXX instructions", 13, 10
-.inval	db "XXXXXXXX PC cache invalidations", 13, 10, 0
+.inval	db "XXXXXXXX PC cache invalidations", 13, 10
+.pcupdt	db "XXXXXXXX calls to updatePC", 13, 10, 0
 
 	; b700 terminate emulation
 	section	.text
@@ -2152,6 +2156,11 @@ hB700:	mov	di, stats.insns
 	mov	ax, [bp+pcinval+2]
 	call	tohex
 	mov	ax, [bp+pcinval]
+	call	tohex
+	mov	di, stats.pcupdt
+	mov	ax, [bp+pcupdt+2]
+	call	tohex
+	mov	ax, [bp+pcupdt]
 	call	tohex
 	mov	si, stats
 	call	puts
