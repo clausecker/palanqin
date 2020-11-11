@@ -281,9 +281,7 @@ step:	ifetch			; fetch instruction
 	lea	si, [bp+regs]	; for use with the decode handlers
 	lea	di, [bp+oprC]	; for use with the decode handlers
 				; which also assume that AX=insn
-	call	[dtXXXX+bx]	; decode operands
-	pop	ax		; the current instruction
-	jmp	[htXXXX+bx]	; execute behaviour
+	jmp	[dtXXXX+bx]	; decode operands
 
 	section	.data
 	align	2, db 0
@@ -347,7 +345,8 @@ imm5rr:	mov	cx, ax		; CX = XXXX XAAA AABB BCCC
 	mov	al, ch		; AL = XXXA AAAA
 	and	ax, 0x1f	; AX = 0000 0000 000A AAAA
 	stosw			; oprA = A
-	ret
+	pop	ax		; the current instruction
+	jmp	[htXXXX+bx]	; execute behaviour
 
 	; decode handler for reg / imm8
 	; instruction layout: XXXX XBBB CCCC CCCC
@@ -362,7 +361,8 @@ rimm8:	xor	cx, cx
 	and	ax, dx		; AX = 0000 0000 000B BB00
 	add	ax, si		; AX = &regs[B]
 	stosw			; oprB = &regs[B]
-	ret
+	pop	ax		; the current instruction
+	jmp	[htXXXX+bx]	; execute behaviour
 
 	; decode handler for reg / reg / reg
 	; instruction layout: XXXXXXXAAABBBCCC
@@ -384,7 +384,12 @@ rrr:	mov	cx, ax		; CX = XXXX XXXA AABB BCCC
 	and	ax, dx		; AX = 0000 0000 000A AA00
 	add	ax, si		; AX = &regs[A]
 	stosw			; oprA = &regs[A]
-	ret
+	; fallthrough
+
+	; decode handlers that perform no decoding
+	align	2
+dnone:	pop	ax		; the current instruction
+	jmp	[htXXXX+bx]	; execute behaviour
 
 	; special decode handler for instructions starting with 0100
 	; 010000... is decoded as imm5 / reg / reg (imm4, really)
@@ -413,11 +418,8 @@ d0100:	test	ax, 0x0800	; is this 01001...?
 	and	ax, 0x3c	; AX = 0000 0000 00BB BB00
 	add	ax, si		; AX = &regs[B]
 	stosw			; oprB = &regs[B]
-	; fallthrough
-
-	; decode handlers that perform no decoding
-	align	2, ret
-dnone:	ret
+	pop	ax		; the current instruction
+	jmp	[htXXXX+bx]	; execute behaviour
 
 	section	.data
 	align	2, db 0
