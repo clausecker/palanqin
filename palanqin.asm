@@ -1110,8 +1110,7 @@ h011:	mov	si, [bp+oprB]	; SI = &Rn
 h1001:	xchg	dx, ax		; DX = instruction
 	mov	di, [bp+oprB]	; DI = &Rt
 	fixRd
-	xor	ax, ax
-	mov	al, [bp+oprC]	; AX = #imm8
+	mov	ax, [bp+oprC]	; AX = #imm8
 	shl	ax, 1		; AX = #imm8 << 2
 	shl	ax, 1
 	xor	cx, cx
@@ -1399,7 +1398,7 @@ h1100:	push	ax		; remember the instruction on the stack
 	push	si		; remember a copy of &Rn
 	lodsw			; CX:AX = Rn
 	mov	cx, [si]
-	test	bx, 0x0800	; is this a load or is it a store?
+	test	bh, 0x08	; is this a load or is it a store?
 	lea	di, rlo(0)	; DI = &R0
 	jnz	h11001
 	; fall through to h11000
