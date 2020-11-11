@@ -2062,16 +2062,15 @@ seglin:	mov	cl, 4
 	ret
 
 	; Translate the address in rhi(15) and fill in pchi, pcseg, and
-	; pcldrh.  Returns pcldrh in BX, pcseg in CX.  Preserves all other
-	; registers.
+	; pcldrh.  Returns pcldrh in BX. Sets CX=CS.
 	aligncc
 ifetchtail:			; entry point when coming from ifetch
 	inc	word rhi(15)	; apply carry from rlo(15)
 fixPC:	mov	cx, rhi(15)	; high part of PC for translation
 .update:mov	[bp+pchi], cx	; remember it
 	call	translate	; BX: handler structure, CX: high part of addr
-	mov	[bp+pcseg], es	; remember high part of address
-	mov	es, cx		; restore es
+	mov	[bp+pcseg], es	; remember translated segment
+	mov	es, cx		; restore ES
 	mov	bx, [bx+mem.ldrh] ; retrieve ldrh accessor function
 	mov	[bp+pcldrh], bx	; remember ldrh accessor function
 	ret
@@ -2104,7 +2103,8 @@ undefined:
 	call	fixPC		; set up translation tables for old PC
 	mov	si, rlo(15)	; load low half of PC
 	dec	si		; clear thumb bit
-	call	bx
+	mov	es, [bp+pcseg]	; load translated segment
+	call	bx		; load PC from memory
 	mov	di, undmsg.insn	; convert instruction to hex
 	call	tohex
 	mov	si, undmsg
