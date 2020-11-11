@@ -1667,11 +1667,11 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 .notbl:	cmp	dh, 0xf3	; is it 11110011?
 	jne	.udf
 	cmp	dl, 0xef	; is it 1111001111101111 (MRS)?
-	je	.mrs
+	je	mrs
 	mov	cx, dx		; CX = 11110XXXXXXXXXXX
 	and	cl, 0xf0	; CX = 11110XXXXXXX0000
 	cmp	cl, 0x80	; is it 111100111000XXXX?
-	je	.msr
+	je	msr
 	cmp	cl, 0xb0	; is it 111100111011XXXX?
 	jne	.udf		; if not, we have an undefined instruction
 	cmp	al, 0x40	; is it 10Y0YYYY0100AAAA -- 10Y0YYYY0110AAAA?
@@ -1687,11 +1687,58 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 
 	; 11110011111XXXXX 10X0AAAABBBBBBBB MRS Rn, spec_reg
 	aligncc
-.mrs:	todo
+mrs:	mov	cl, 6
+	mov	si, ax
+	shr	si, cl		; DI = 00000010 X0AAAA00
+	and	si, 0x3c	; DI = 00000000 00AAAA00
+	xor	dx, dx		; DX = 0
+	mov	cx, ax		; keep a copy of the second instruction byte
+	and	al, 0xf8	; AX = 10X0AAAABBBBB000
+	test	al, al		; is this one of the APSR/EPSR/IPSR registers?
+	je	.psr
+	cmp	al, 0x08	; is this an SP access instruction?
+	je	.sp
+
+	; TODO: handle priority mask/control register access
+	; once interrupt handling is in
+	;cmp	al, 0x10	; is this a priority mask or CONTROL access?
+	;je	.prio
+
+	; otherwise, this is an unknown register -- read as 0
+.clr:	mov	[bp+si+regs], dx ; clear Rd
+	mov	[bp+si+regs+hi], dx
+	ret
+
+	; construct the APRS/IPSR combination in AX:DX and return it
+	; TODO: add IPSR code once interrupt handling is implemented
+.psr:	call	fixflags	; set up flags, kills AX
+	xor	ax, ax
+	test	cl, 0x04	; want the APSR bits?
+	jz	.wb
+	mov	ax, [bp+flags]	; set up flags
+	xchg	ah, al		; AX = NZXXXXXC XXXXVXXX
+	and	ax, 0xc108	; AX = NZ00000C 0000V000
+	shl	al, 1		; AX = NZ00000C 000V0000
+	or	ah, al		; AX = NZ0V000C 000V0000
+	sahf			; load AH into flags
+	jnc	.nc
+	or	ah, 0x20	; AX = NZCV000C 000V0000
+.nc:	and	ax, 0xf000	; AX = NZCV0000 00000000
+.wb:	mov	[bp+si+regs], dx ; write registers back
+	mov	[bp+si+regs+hi], ax
+	ret
+
+.sp:	test	cl, 0x07	; do we want the user stack?
+	jnz	.clr		; if not, we don't have anything	
+	mov	ax, rlo(13)	; dx:ax = SP
+	mov	dx, rhi(13)	; Rd = SP
+	mov	[bp+si+regs], ax
+	mov	[bp+si+regs+hi], dx
+	ret
 
 	; 11110011100XAAAA 10X0XXXXBBBBBBBB MSR spec_reg, Rn
 	aligncc
-.msr:	sub	dx, cx		; DX = 000000000000AAAA
+msr:	sub	dx, cx		; DX = 000000000000AAAA
 	todo
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

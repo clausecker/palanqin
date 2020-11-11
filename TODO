@@ -43,6 +43,7 @@ Currently implemented instructions:
     MOV   Rd, Rm
     MOVS  Rd, #imm8
     MOVS  Rd, Rm
+    MRS   Rd, spec_reg
     MULS  Rd, Rm
     MVNS  Rd, Rm
     NOP
