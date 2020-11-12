@@ -36,11 +36,17 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 	; Trashes AX, preserves all other registers.
 	; the intent is to save the flags if Rd == [bp+zsreg] and flag
 	; recovery would otherwise be impossible.
+	; a fixrest macro must be placed under the same label
 %macro	fixRd	0
 	cmp	di, [bp+zsreg]	; is Rd == [bp+zsreg]?
-	jne	%%nofix
-	call	fixflags.entry	; if yes, fix it up
-%%nofix:
+	je	.fixRd
+.endfixRd:			; used by fixrest
+%endmacro
+
+%macro	fixrest	0
+.fixRd:	mov	ax, .endfixRd	; return address
+	push	ax		; for fixflags.entry
+	jmp	fixflags.entry	; which we call by means of a jump
 %endmacro
 
 	; load one instruction into AX and advance PC past it.
@@ -688,6 +694,7 @@ h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 	adc	cx, rhi(15)
 	and	al, ~3		; align to word boundary
 	jmp	ldr		; perform the actual load
+	fixrest
 
 	; 0100000000BBBCCC ANDS Rdn, Rm
 	aligncc
@@ -1045,6 +1052,7 @@ h01000100:
 	jne	.updt		; if not, update it!
 	ret			; otherwise return without doing anything
 .updt:	jmp	fixPC.update
+	fixrest
 
 	; 01000110CBBBBCCC MOV Rd, Rm
 	aligncc
@@ -1056,6 +1064,7 @@ h01000110:
 	cmp	di, cx		; is DI = &PC?
 	jz	h01000100.fix	; if yes, fix up PC cache
 	ret
+	fixrest
 
 	; 010001110BBBBXXX BX Rm
 	; 010001111BBBBXXX BLX Rm
@@ -1094,7 +1103,7 @@ h0101:	mov	bl, ah		; BL = 0101XXXA
 	add	ax, [si]	; CX:AX = Rn + Rm
 	adc	cx, [si+hi]
 	jmp	[ht0101+bx]	; perform instruction behavior
-
+	fixrest
 
 	; load/store immediate offset
 	; 01100AAAAABBBCCC STR	Rt, [Rn, #imm5]
@@ -1116,6 +1125,7 @@ h011:	mov	si, [bp+oprB]	; SI = &Rn
 	shr	bx, 1		; prepare index
 	shr	bx, 1
 	jmp	[ht011+bx]	; perform load/store
+	fixrest
 
 	; 10010BBBCCCCCCCC STR Rd, [SP, #imm8]
 	; 10011BBBCCCCCCCC LDR Rd, [SP, #imm8]
@@ -1133,6 +1143,7 @@ h1001:	xchg	dx, ax		; DX = instruction
 	jz	.str		; otherwise it is STR
 	jmp	ldr
 .str:	jmp	str
+	fixrest
 
 	; 10100BBBCCCCCCCC ADD Rd, PC, #imm8 (ADR Rd, label)
 	; 10101BBBCCCCCCCC ADD Rd, SP, #imm8
@@ -1156,6 +1167,7 @@ h1010:	mov	di, [bp+oprB]	; di = &Rd
 	stosw			; Rd = DX:AX
 	mov	[di], dx
 	ret
+	fixrest
 
 	; miscellaneous instructions
 	; 4 more instruction bits decode the subinstruction
@@ -1212,6 +1224,7 @@ h10110010:
 	fixRd			; set flags on Rd if needed
 	lodsw			; AX = Rm(lo), SI += 2
 	jmp	[htB2BA+bx]	; perform instruction handler
+	fixrest
 
 	; 1011001000AAABBB SXTH Rd, Rm
 	aligncc
