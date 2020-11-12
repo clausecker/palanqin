@@ -1037,9 +1037,14 @@ h01000100:
 	lodsw			; AX = Rm(hi)
 	adc	[di+hi], ax	; Rd(hi) += Rm(hi) + C
 	cmp	di, cx		; is DI = &PC?
-	jnz	h01000110.ret
+	jz	.fix		; if yes, fix up PC cache
+	ret
 .fix:	or	byte [di], 1	; make sure the thumb bit is not cleared
-	jmp	updatePC	; and fix the PC cache
+	mov	cx, [di+hi]	; high part of PC
+	cmp	cx, [bp+pchi]	; is the cache up to date?
+	jne	.updt		; if not, update it!
+	ret			; otherwise return without doing anything
+.updt:	jmp	fixPC.update
 
 	; 01000110CBBBBCCC MOV Rd, Rm
 	aligncc
@@ -1050,7 +1055,7 @@ h01000110:
 	sub	di, 4		; restore DI
 	cmp	di, cx		; is DI = &PC?
 	jz	h01000100.fix	; if yes, fix up PC cache
-.ret:	ret
+	ret
 
 	; 010001110BBBBXXX BX Rm
 	; 010001111BBBBXXX BLX Rm
@@ -1058,17 +1063,23 @@ h01000110:
 h01000111:
 	mov	di, cx		; DI = &PC
 	test	al, 0x80	; is this BLX?
-	mov	ax, [di]	; DX:AX = PC
+	mov	bx, [di]	; DX:BX = PC
 	mov	dx, [di+2]	;
-	movsw			; PC = Rm
-	movsw
+	lodsw			; CX:AX = Rm
+	mov	cx, [si]
+	stosw			; PC(lo) = Rm(lo)
 	jz	.bx
-	mov	rlo(14), ax	; LR = DX:AX
+	mov	rlo(14), bx	; LR = DX:BX (old PC)
 	mov	rhi(14), dx
-.bx:	test	byte rlo(15), 1	; is the thumb bit set?
+.bx:	test	al, 1		; is the thumb bit set?
 	jz	.arm
-	jmp	updatePC	; update PC if required
-.arm:	jmp	undefined
+	cmp	cx, dx		; is the PC cache up to date?
+	jne	.updt		; if not, update it
+	ret			; if it is up to date, so is PC(hi)
+.updt:	mov	[di], cx	; PC(hi) = Rm(hi)
+	jmp	fixPC.update
+.arm:	mov	[di], cx	; PC(hi) = Rm(hi)
+	jmp	undefined
 
 	; 0101XXXAAABBBCCC load/store register offset
 	aligncc
@@ -1358,15 +1369,16 @@ h1011110:
 	push	ax		; preserve CX:AX around ldr call
 	push	cx
 	call	ldr		; load PC from memory
-	pop	cx
+	test	al, 1		; is the thumb bit set?
+	jz	.arm
+	cmp	dx, [bp+pchi]	; is the PC cache up to date?
+	je	.noupd		; if yes, update it!
+	mov	cx, dx		; move PC(hi) to where it is expected
+	call	fixPC.update
+.noupd:	pop	cx		; restore previously saved CX:AX
 	pop	ax
 	add	ax, 4		; CX:AX += 4
 	adc	cx, 0
-	test	byte rlo(15), 1	; is the thumb bit set?
-	jz	.arm
-	push	cx		; preserve CX around updatePC call
-	call	updatePC
-	pop	cx
 .nopc:	mov	rlo(13), ax	; write back SP
 	mov	rhi(13), cx
 	ret
@@ -1465,7 +1477,7 @@ h1101:	mov	cl, ah		; CL = 1101AAAA
 	shl	al, 1		; AL = 01AAAA00
 	cbw			; AX = 01AAAA00
 	add	ax, h1101xxxx-0x40
-	xchg	bx, ax		; DI = h1101xxxx[AAAA]
+	xchg	bx, ax		; BX = h1101xxxx[AAAA]
 	call	fixflags	; set up true flags in flags
 	push	word [bp+flags]
 	popf			; set up SF, OF, ZF, and CF according to flags
@@ -1560,10 +1572,13 @@ h1101xxxx:
 	inc	ax		; AX = #imm8 + 1
 	shl	ax, 1		; AX = #imm8:0 + 2
 	cwd			; DX:AX = #imm8 + 2
-	add	rlo(15), ax	; R15 += #imm8 + 2 + 2
-	adc	rhi(15), dx	; note that R15 had already been advanced by two
-				; in the initial ifetch call.
-	jmp	updatePC	; update PC cache if needed
+	add	rlo(15), ax	; R15(lo) += #imm8 + 2 + 2 (note that R15 had
+				; already been advanced by two by ifetch)
+	adc	dx, 0		; compute carry
+	jnz	.carry		; if there is no carry, we are done here
+	ret
+.carry:	add	rhi(15), dx	; apply carry to R15(hi)
+	jmp	fixPC		; and fix up the PC cache
 
 	; 11011111XXXXXXXX SVC #imm8
 .svc:	todo			; todo
@@ -1579,8 +1594,11 @@ h1110:	test	ax, 0x0800	; is this B #imm11?
 	shl	ax, 1		; AX = #imm11 + 2
 	cwd			; DX:AX = #imm11 + 2
 	add	rlo(15), ax	; R15 += #imm11 + 2
-	adc	rhi(15), dx
-	jmp	updatePC	; update PC cache if needed
+	adc	dx, 0		; apply carry
+	jnz	.carry		; if there was no carry
+	ret			; PC(hi) is up to date
+.carry:	add	rhi(15), dx	; otherwise, update PC(hi)
+	jmp	fixPC		; and fix the PC cache
 .udf:	jmp	undefined	; 11101XXXXXXXXXXX is undefined
 
 	; 32 bit instructions
@@ -1618,8 +1636,11 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 	jnz	.j2
 	xor	dl, 0x80	; DX = SSSSSSSSxyBBBBBB, xy = ~SS^JJ
 .j2:	add	rlo(15), bx	; PC += #imm24:0
-	adc	rhi(15), dx
-	jmp	updatePC	; update PC cache if needed
+	adc	dx, rhi(15)	; DX gets the carry
+	jnz	.carry		; if there is no carry, we are done
+	ret
+.carry:	add	rhi(15), dx	; if there is, update PC(hi)
+	jmp	fixPC		; and the PC cache
 
 	; 111101111111AAAA 1010AAAAAAAAAAAA UDF #imm16
 	; and other undefined instructions
@@ -2074,15 +2095,6 @@ fixPC:	mov	cx, rhi(15)	; high part of PC for translation
 	mov	bx, [bx+mem.ldrh] ; retrieve ldrh accessor function
 	mov	[bp+pcldrh], bx	; remember ldrh accessor function
 	ret
-
-	; Same as fixPC, but first check if the cache is up to do
-	; no guarantees about the return value are given.
-	aligncc
-updatePC:
-	mov	cx, rhi(15)	; high part of PC
-	cmp	cx, [bp+pchi]	; is the cache up to date?
-	jne	fixPC.update	; if not, update it!
-	ret			; otherwise return without doing anything
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Exceptions, Events, and Interrupts                                         ;;
