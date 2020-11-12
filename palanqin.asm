@@ -1951,8 +1951,8 @@ ldstnone:
 	aligncc
 ldrimm:	shl	ax, 1		; scale immediate
 	shl	ax, 1
-	add	ax, [si]
-	adc	cx, [si+2]
+	add	ax, [byte si]	; add useless index byte to avoid NOP for
+	adc	cx, [si+2]	; alignment
 	; fallthrough
 
 	; load word from ARM address CX:AX and deposit into the register
@@ -1969,8 +1969,8 @@ ldr:	call	translate	; ES:AX: translated address, BX: handler
 	; and then perform ldrh effect
 	aligncc
 ldrhimm:shl	ax, 1		; scale immediate
-	add	ax, [si]
-	adc	cx, [si+2]
+	add	ax, [byte si]	; add useless index byte to avoid NOP for
+	adc	cx, [si+2]	; alignment
 	; fallthrough
 
 	; load halfword from ARM address CX:AX and deposit into the register
@@ -1997,8 +1997,8 @@ ldrsh:	call	translate	; ES:AX: translated address, BX: handler
 
 	; add source address in [SI] to CX:AX, then perform ldrb effect
 	aligncc
-ldrbimm:add	ax, [si]
-	adc	cx, [si+2]
+ldrbimm:add	ax, [byte si]	; add useless index byte to avoid NOP for
+	adc	cx, [si+2]	; alignment
 	; fallthrough
 
 	; load byte from ARM address CX:AX, zero-extend and deposit into the
@@ -2031,8 +2031,8 @@ ldrsb:	call	translate	; ES:AX: translated address, BX: handler
 	aligncc
 strimm:	shl	ax, 1		; scale immediate
 	shl	ax, 1
-	add	ax, [si]
-	adc	cx, [si+2]
+	add	ax, [byte si]	; add useless index byte to avoid NOP for
+	adc	cx, [si+2]	; alignment
 	; fallthrough
 
 	; store word from register pointed to by DI to ARM address CX:AX.
@@ -2048,8 +2048,8 @@ str:	call	translate	; ES:AX: translated address, BX: handler
 	; and then perform strh effect
 	aligncc
 strhimm:shl	ax, 1		; scale immediate
-	add	ax, [si]
-	adc	cx, [si+2]
+	add	ax, [byte si]	; add useless index byte to avoid NOP for
+	adc	cx, [si+2]	; alignment
 	; fallthrough
 
 	; store halfword from register pointed to by DI to ARM address CX:AX.
@@ -2061,8 +2061,8 @@ strh:	call	translate	; ES:AX: translated address, BX: handler
 
 	; add CX:AX to source address in [SI], then perform strb effect
 	aligncc
-strbimm:add	ax, [si]
-	adc	cx, [si+2]
+strbimm:add	ax, [byte si]	; add useless index byte to avoid NOP for
+	adc	cx, [si+2]	; alignment
 	; fallthrough
 
 	; store byte from register pointed to by DI to ARM address CX:AX.
