@@ -37,6 +37,8 @@ stack	equ	0x100		; emulator stack size in bytes (multiple of 16)
 	; the intent is to save the flags if Rd == [bp+zsreg] and flag
 	; recovery would otherwise be impossible.
 %macro	fixRd	0
+	add	word [bp+fRdcnt], 1 ; instrumentation
+	adc	word [bp+fRdcnt+2], 0
 	cmp	di, [bp+zsreg]	; is Rd == [bp+zsreg]?
 	jne	%%nofix
 	call	fixflags.entry	; if yes, fix it up
@@ -245,6 +247,8 @@ pcldrh	resw	1		; ldrh accessor function for pchi
 insns	resw	2		; number of instructions executed
 pcinval	resw	2		; PC cache invalidation count
 pcupdt	resw	2		; number of times updatePC has been called
+fRdcnt	resw	2		; fixRd macro invocations
+Rdfix	resw	2		; number of flag fixes from fixRd
 
 	; Memory maps.  The high word of an ARM address sans the address space
 	; nibble is looked up in this table to form a segment.  The low word
@@ -1677,12 +1681,14 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 fixflags:
 	mov	di, [bp+zsreg]
 	test	di, di		; flags already fixed?
-	jnz	.entry
+	jnz	.fix
 	ret			; if yes, there's nothing left to do
 
 	; fixRd entry point
 	aligncc
-.entry:	mov	ax, [di]	; ax = zsreg(lo)
+.entry:	add	word [bp+Rdfix], 1 ; instrumentation
+	adc	word [bp+Rdfix+2], 0
+.fix:	mov	ax, [di]	; ax = zsreg(lo)
 	or	al, ah		; make sure LSB of AH is accounted for
 	shr	ah, 1		; clear MSB of AX, destroy LSB of AH
 	or	ax, [di+hi]	; set SF and ZF on zsreg
@@ -2143,8 +2149,9 @@ B7max	equ	($-htB7-2)/2	; highest escape hatch number used
 stats	db 13, 10
 .insns	db "XXXXXXXX instructions", 13, 10
 .inval	db "XXXXXXXX PC cache invalidations", 13, 10
-.pcupdt	db "XXXXXXXX calls to updatePC", 13, 10, 0
-
+.pcupdt	db "XXXXXXXX calls to updatePC", 13, 10
+.fRdcnt	db "XXXXXXXX fixRd invocations", 13, 10
+.Rdfix	db "XXXXXXXX times fixRd fixed Rd", 13, 10, 0
 	; b700 terminate emulation
 	section	.text
 hB700:	mov	di, stats.insns
@@ -2161,6 +2168,16 @@ hB700:	mov	di, stats.insns
 	mov	ax, [bp+pcupdt+2]
 	call	tohex
 	mov	ax, [bp+pcupdt]
+	call	tohex
+	mov	di, stats.fRdcnt
+	mov	ax, [bp+fRdcnt+2]
+	call	tohex
+	mov	ax, [bp+fRdcnt]
+	call	tohex
+	mov	di, stats.Rdfix
+	mov	ax, [bp+Rdfix+2]
+	call	tohex
+	mov	ax, [bp+Rdfix]
 	call	tohex
 	mov	si, stats
 	call	puts
