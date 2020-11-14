@@ -21,6 +21,21 @@ type
 
 to run the advent binary.
 
+As another example, a variant of Mecrisp Stellaris adapted for Palanqin
+is provided in contrib/stellaris.  Make sure a copy of the
+gcc-arm-embedded toolchain is provided in your PATH and then type
+
+    cd contrib/stellaris; sh build.sh
+
+to compile it.  Forth binaries with some useful words preloaded can then
+be found in
+
+    contrib/stellaris/palanqin/precompiled/stelaqin.bin
+    contrib/stellaris/palanqin-ra/precompiled/stelaqin.bin
+
+where the ra version has a more sophisticated compiler with register
+allocation.
+
 # Register contents on reset:
 
 R0:  program image base address
