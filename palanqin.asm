@@ -1649,7 +1649,7 @@ h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 	jnz	.j2
 	xor	dl, 0x80	; DX = SSSSSSSSxyBBBBBB, xy = ~SS^JJ
 .j2:	add	rlo(15), bx	; PC += #imm24:0
-	adc	dx, rhi(15)	; DX gets the carry
+	adc	dx, 0		; DX gets the carry
 	jnz	.carry		; if there is no carry, we are done
 	ret
 .carry:	add	rhi(15), dx	; if there is, update PC(hi)
