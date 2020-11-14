@@ -249,7 +249,7 @@ int reset ( void )
    cpsr=0;
    reg_norm[13]=fetch32(0x00000000); // Return stack pointer
    reg_norm[14]=0xFFFFFFFF;          // Link register
-   reg_norm[15]=fetch32(0x00000004); // Reset vector
+   reg_norm[15]=fetch32(0x00000004)+2; // Reset vector
    reg_norm[15]&=~1;
 
    return(0);
@@ -267,7 +267,15 @@ int main ( int argc, char *argv[] )
    unsigned int ra;
 
    fp=fopen(argv[1],"rb");
+   if (fp == NULL) {
+     perror(argv[1]);
+     return(1);
+   }
    ra=fread(rom,1,sizeof(rom),fp);
+   if (ferror(fp)) {
+     perror(argv[1]);
+     return(1);
+   }
    fclose(fp);
 
    reset();
