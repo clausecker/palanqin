@@ -1,0 +1,4 @@
+#!/bin/bash
+
+cc -o thumbulator-palanqin         -O2 thumbulator-palanqin.c
+
