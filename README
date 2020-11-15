@@ -68,7 +68,7 @@ The otherwise undefined instructions 0xb700 -- 0xb7ff are used to
 interact with the host system.  Escape hatch opcodes that aren't
 currently implemented behave like an undefined instruction.
 
-    ????
+    B705
 
 Perform a host software interrupt.  On entry, the 8086 registers are
 set up as described below.  On exit from the interrupt handler, the
