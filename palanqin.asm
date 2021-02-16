@@ -8,7 +8,7 @@
 	extern	end, edata, etext, bsswords
 
 	section	.data
-ident	db	"Palanqin 0.1 (c) 2020 Robert Clausecker <fuz@fuz.su>"
+ident	db	"Palanqin 0.3 (c) 2020, 2021 Robert Clausecker <fuz@fuz.su>"
 crlf	db	13, 10, 0
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
