@@ -311,12 +311,12 @@ dtXXXX:	dw	imm5rr		; 000XX imm5 / Rm / Rd
 	dw	imm5rr		; 1000X imm5 / Rn / Rd
 	dw	rimm8		; 1001X Rd / imm8
 	dw	rimm8		; 1010X Rd / imm8
-	dw	dnone		; 1011 misc. instructions
+	dw	d1011		; 1011 misc. instructions
 	dw	rimm8		; 1100X Rn / imm8
-	dw	dnone		; 1101 cond / imm8
-	dw	dnone		; 11100 imm11
+	dw	d1101		; 1101 cond / imm8
+	dw	d1110		; 11100 imm11
 				; 11101 32 bit instructions
-	dw	dnone		; 1111 32 bit instructions
+	dw	d1111		; 1111 32 bit instructions
 
 	section	.text
 
@@ -389,39 +389,6 @@ rrr:	shl	ax, 1		; AX = XXXX XXAA ABBB CCC0
 	and	ax, dx		; AX = 0000 0000 000A AA00
 	add	ax, si		; AX = &regs[A]
 	stosw			; oprA = &regs[A]
-	; fallthrough
-
-	; decode handlers that perform no decoding
-	align	2
-dnone:	pop	ax		; the current instruction
-	jmp	[htXXXX+bx]	; execute behaviour
-
-	; special decode handler for instructions starting with 0100
-	; 010000... is decoded as imm5 / reg / reg (imm4, really)
-	; 010001... is decoded in a special manner
-	; 01001... is decoded as reg / imm8
-	aligncc
-d0100:	test	ax, 0x0800	; is this 01001...?
-	jnz	rimm8		; if yes, decode as reg / imm8
-	test	ax, 0x0400	; else, is this 010000...?
-	jz	imm5rr		; if yes, decode as imm5 / reg / reg
-
-	; if we get here, we have instruction 0100 01XX CBBB BCCC
-	; note how the C operand is split in two!
-	shl	ax, 1		; AX = XXXX XXXC BBBB CCC0
-	shl	ax, 1		; AX = XXXX XXCB BBBC CC00
-	and	ax, dx		; AX = 0000 0000 000C CC00
-	shr	cx, 1		; CX = 0010 001X XCBB BBCC
-	mov	dx, cx		; make a copy for masking
-	shr	dx, 1		; DX = 0001 0001 XXCB BBBC
-	and	dx, 0x20	; DX = 0000 0000 00C0 0000
-	or	ax, dx		; AX = 0000 0000 00CC CC00
-	add	ax, si		; AX = &regs[C]
-	stosw			; oprC = &regs[C]
-	xchg	cx, ax
-	and	ax, 0x3c	; AX = 0000 0000 00BB BB00
-	add	ax, si		; AX = &regs[B]
-	stosw			; oprB = &regs[B]
 	pop	ax		; the current instruction
 	jmp	[htXXXX+bx]	; execute behaviour
 
@@ -657,10 +624,38 @@ h00111:	sub	[di], ax	; Rd -= AX
 	pop	word [bp+flags]
 	ret
 
+	; special decode handler for instructions starting with 0100
+	; 010000... is decoded as imm5 / reg / reg (imm4, really)
+	; 010001... is decoded in a special manner
+	; 01001... is decoded as reg / imm8
+	aligncc
+d0100:	test	ax, 0x0800	; is this 01001...?
+	jnz	rimm8		; if yes, decode as reg / imm8
+	test	ax, 0x0400	; else, is this 010000...?
+	jz	imm5rr		; if yes, decode as imm5 / reg / reg
+
+	; if we get here, we have instruction 0100 01XX CBBB BCCC
+	; note how the C operand is split in two!
+	shl	ax, 1		; AX = XXXX XXXC BBBB CCC0
+	shl	ax, 1		; AX = XXXX XXCB BBBC CC00
+	and	ax, dx		; AX = 0000 0000 000C CC00
+	shr	cx, 1		; CX = 0010 001X XCBB BBCC
+	mov	dx, cx		; make a copy for masking
+	shr	dx, 1		; DX = 0001 0001 XXCB BBBC
+	and	dx, 0x20	; DX = 0000 0000 00C0 0000
+	or	ax, dx		; AX = 0000 0000 00CC CC00
+	add	ax, si		; AX = &regs[C]
+	stosw			; oprC = &regs[C]
+	xchg	cx, ax
+	and	ax, 0x3c	; AX = 0000 0000 00BB BB00
+	add	ax, si		; AX = &regs[B]
+	stosw			; oprB = &regs[B]
+	pop	ax		; the current instruction
+	; fallthrough
+
 	; 010000AAAABBBCCC data-processing register
 	; 010001AACBBBBCCC special data processing
 	; 01001BBBCCCCCCCC LDR Rd, [PC, #imm8]
-	aligncc
 h0100:	mov	di, [bp+oprC]	; DI = &Rdn
 	mov	si, [bp+oprB]	; SI = &Rm
 	test	ax, 0x0800	; is this LDR Rd, [PC, #imm8]?
@@ -1170,6 +1165,7 @@ h1010:	mov	di, [bp+oprB]	; di = &Rd
 	; miscellaneous instructions
 	; 4 more instruction bits decode the subinstruction
 	aligncc
+d1011:	pop	ax		; the current instruction
 h1011:	mov	bl, ah		; BL = 1011XXXX
 	shl	bl, 1		; BL = 011XXXX0
 	and	bx, 0x1e	; BX = 000XXXX0
@@ -1482,6 +1478,7 @@ h11001: shr	byte [bp+oprC], 1 ; advance bit-mask to next register
 	; 11011110CCCCCCCC UDF #imm8
 	; 11011111CCCCCCCC SVC #imm8
 	aligncc
+d1101:	pop	ax		; the current instruction
 h1101:	mov	cl, ah		; CL = 1101AAAA
 	xchg	cx, ax		; CX = insn, AL = 1101AAAA
 	shl	al, 1		; AL = 101AAAA0
@@ -1597,6 +1594,7 @@ h1101xxxx:
 	; 11100CCCCCCCCCCC B #imm11
 	; 11101XXXXXXXXXXX 32-bit instructions
 	aligncc
+d1110:	pop	ax		; the current instruction
 h1110:	test	ax, 0x0800	; is this B #imm11?
 	jnz	.udf		; or is it a 32 bit instruction?
 	add	ax, 0x1c00	; AX = ccccccCCCCCCCCCC (c = complemented sign)
@@ -1614,6 +1612,7 @@ h1110:	test	ax, 0x0800	; is this B #imm11?
 
 	; 32 bit instructions
 	aligncc
+d1111:	pop	ax		; the current instruction
 h1111:	test	ax, 0x0800	; is this 11111XXXXXXXXXXX?
 	jnz	h1110.udf	; if yes, execute as undefined.
 	push	ax		; remember low instruction word
