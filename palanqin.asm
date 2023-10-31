@@ -286,6 +286,7 @@ step:	ifetch			; fetch instruction
 	mov	dx, 0x1c	; mask for use with the decode handlers
 	lea	si, [bp+regs]	; for use with the decode handlers
 	lea	di, [bp+oprC]	; for use with the decode handlers
+	mov	cx, ax		; for use with the decode handlers
 				; which also assume that AX=insn
 	jmp	[dtXXXX+bx]	; decode operands
 
@@ -324,9 +325,9 @@ dtXXXX:	dw	imm5rr		; 000XX imm5 / Rm / Rd
 	; 000110... as reg / reg / reg and
 	; 000111 as imm5 / reg / reg again
 	aligncc
-d0001:	mov	cx, ax		; make a copy of insn
-	and	ch, 0xc		; mask the two bits 00001100
+d0001:	and	ch, 0xc		; mask the two bits 00001100
 	cmp	ch, 0x08	; are these set to 10?
+	mov	cx, ax		; restore AX copy
 	je	rrr		; if yes, decode as rrr
 				; else fall through and decode as imm5rr
 
@@ -336,8 +337,7 @@ d0001:	mov	cx, ax		; make a copy of insn
 	; the handler for these instructions must manually decode the
 	; register from oprA
 	align	2
-imm5rr:	mov	cx, ax		; CX = XXXX XAAA AABB BCCC
-	shl	ax, 1		; AX = XXXX AAAA ABBB CCC0
+imm5rr:	shl	ax, 1		; AX = XXXX AAAA ABBB CCC0
 	shl	ax, 1		; AX = XXXA AAAA BBBC CC00
 	mov	ch, ah		; CX = XXXA AAAA **BB BCCC
 	and	ax, dx		; AX = 0000 0000 000C CC00
@@ -373,8 +373,7 @@ rimm8:	xor	cx, cx
 	; decode handler for reg / reg / reg
 	; instruction layout: XXXXXXXAAABBBCCC
 	aligncc
-rrr:	mov	cx, ax		; CX = XXXX XXXA AABB BCCC
-	shl	ax, 1		; AX = XXXX XXAA ABBB CCC0
+rrr:	shl	ax, 1		; AX = XXXX XXAA ABBB CCC0
 	shl	ax, 1		; AX = XXXX XAAA BBBC CC00
 	and	ax, dx		; AX = 0000 0000 000C CC00
 	add	ax, si		; AX = &regs[C]
@@ -409,7 +408,6 @@ d0100:	test	ax, 0x0800	; is this 01001...?
 
 	; if we get here, we have instruction 0100 01XX CBBB BCCC
 	; note how the C operand is split in two!
-	mov	cx, ax		; CX = 0100 01XX CBBB BCCC
 	shl	ax, 1		; AX = XXXX XXXC BBBB CCC0
 	shl	ax, 1		; AX = XXXX XXCB BBBC CC00
 	and	ax, dx		; AX = 0000 0000 000C CC00
