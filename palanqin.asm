@@ -1,5 +1,5 @@
 ; Palanquin -- Cortex-M0 emulator for 8086
-; Copyright (c) 2020 Robert Clausecker <fuz@fuz.su>
+; Copyright (c) 2020, 2021, 2023 Robert Clausecker <fuz@fuz.su>
 
 	cpu	8086		; restrict nasm to 8086 instructions
 	bits	16
@@ -8,7 +8,8 @@
 	extern	end, edata, etext, bsswords
 
 	section	.data
-ident	db	"Palanqin 0.3 (c) 2020, 2021 Robert Clausecker <fuz@fuz.su>"
+ident	db	"Palanqin 0.3 (c) 2020, 2021, 2023 "
+	db	"Robert Clausecker <fuz@fuz.su>"
 crlf	db	13, 10, 0
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
